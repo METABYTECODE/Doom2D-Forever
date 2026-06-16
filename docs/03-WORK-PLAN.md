@@ -144,20 +144,7 @@ Map viewer на converted assets.
 ### Цель
 Игрок ходит по карте.
 
-**Статус: 🔄 начато** — AABB collision + WASD prototype в MapViewer.
-
-### Задачи
-
-| # | Задача | Приоритет |
-|---|--------|-----------|
-| 4.1 | EnTT integration | P0 |
-| 4.2 | Transform, Velocity, Collider | P0 |
-| 4.3 | PhysicsSystem (port g_Obj_Move) | P0 |
-| 4.4 | Map collision grid | P0 |
-| 4.5 | Panel collision (wall, step, water, acid) | P0 |
-| 4.6 | Moving panels (doors, lifts) | P1 |
-| 4.7 | Input → movement | P0 |
-| 4.8 | Events: `PlayerLanded`, `PlayerEnteredLiquid` | P1 |
+**Статус: ✅ завершено** (doors, lifts, traps, acid, exit, EventBus events)
 
 ---
 

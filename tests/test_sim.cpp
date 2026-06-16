@@ -1,13 +1,22 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
+#include <filesystem>
 
+#include <d2df/core/event_bus.hpp>
 #include <d2df/core/fixed_timestep.hpp>
+#include <d2df/core/game_events.hpp>
+#include <d2df/ecs/game_world.hpp>
 #include <d2df/map/area_types.hpp>
 #include <d2df/map/map_document.hpp>
+#include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/map_spawn.hpp>
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/trigger_types.hpp>
+
+#ifndef D2DF_SOURCE_DIR
+#define D2DF_SOURCE_DIR "."
+#endif
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/trigger_system.hpp>
@@ -239,7 +248,30 @@ TEST_CASE("teleport d2d target is player feet position", "[sim]") {
     CHECK(std::abs(player.y - (992.0f - sim::PlayerState::height)) < 0.01f);
 }
 
-TEST_CASE("CloseTrap on load leaves trap panels open", "[sim]") {
+TEST_CASE("Trap with ACTIVATE_NONE does not fire on map load", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& trap = doc.panels.back();
+    trap.type = map::PANEL_OPENDOOR;
+    trap.position = {944, 272};
+    trap.size = {16, 16};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trigger = doc.triggers.back();
+    trigger.type = map::TriggerType::Trap;
+    trigger.target_panel = 0;
+    trigger.position = {944, 272};
+    trigger.size = {16, 16};
+    trigger.activate = map::ActivateType::None;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    CHECK_FALSE(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("Press expander on load configures trap corridor", "[sim]") {
     map::MapDocument doc;
 
     doc.panels.push_back(map::MapPanel{});
@@ -264,19 +296,34 @@ TEST_CASE("CloseTrap on load leaves trap panels open", "[sim]") {
     auto& open_center = doc.triggers.back();
     open_center.type = map::TriggerType::OpenDoor;
     open_center.target_panel = 0;
+    open_center.position = {100, 100};
+    open_center.size = {16, 16};
     open_center.activate = map::ActivateType::None;
 
     doc.triggers.push_back(map::MapTrigger{});
     auto& open_sides = doc.triggers.back();
     open_sides.type = map::TriggerType::OpenDoor;
     open_sides.target_panel = 1;
+    open_sides.position = {200, 100};
+    open_sides.size = {16, 16};
     open_sides.activate = map::ActivateType::None;
 
     doc.triggers.push_back(map::MapTrigger{});
     auto& close_center = doc.triggers.back();
     close_center.type = map::TriggerType::CloseTrap;
     close_center.target_panel = 0;
+    close_center.position = {100, 120};
+    close_center.size = {16, 16};
     close_center.activate = map::ActivateType::None;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& press = doc.triggers.back();
+    press.type = map::TriggerType::Press;
+    press.position = {80, 80};
+    press.size = {16, 16};
+    press.activate = map::ActivateType::None;
+    press.press_position = {90, 95};
+    press.press_size = {230, 30};
 
     sim::TriggerSystem triggers;
     triggers.reset(doc);
@@ -322,6 +369,52 @@ TEST_CASE("CloseDoor trigger makes OPENDOOR panel solid", "[sim]") {
     CHECK((state & sim::MOVE_HITLAND) != 0);
 }
 
+TEST_CASE("lift direction change preserves door panel state", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& door = doc.panels.back();
+    door.type = map::PANEL_OPENDOOR;
+    door.position = {100, 80};
+    door.size = {16, 16};
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& lift_zone = doc.panels.back();
+    lift_zone.type = map::PANEL_LIFTUP;
+    lift_zone.position = {200, 80};
+    lift_zone.size = {64, 64};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& open_door = doc.triggers.back();
+    open_door.type = map::TriggerType::OpenDoor;
+    open_door.target_panel = 0;
+    open_door.position = {80, 80};
+    open_door.size = {16, 16};
+    open_door.activate = map::ActivateType::PlayerPress;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& lift_toggle = doc.triggers.back();
+    lift_toggle.type = map::TriggerType::Lift;
+    lift_toggle.target_panel = 1;
+    lift_toggle.position = {210, 90};
+    lift_toggle.size = {16, 16};
+    lift_toggle.activate = map::ActivateType::PlayerPress;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(78.0f, 78.0f);
+    triggers.update(player, true);
+    CHECK_FALSE(triggers.panels()[0].enabled);
+
+    player.snap_to(208.0f, 88.0f);
+    triggers.update(player, true);
+
+    CHECK_FALSE(triggers.panels()[0].enabled);
+    CHECK((triggers.panels()[1].type & map::PANEL_LIFTDOWN) != 0);
+}
+
 TEST_CASE("open OPENDOOR panel has no collision", "[sim]") {
     map::MapDocument doc;
 
@@ -339,4 +432,271 @@ TEST_CASE("open OPENDOOR panel has no collision", "[sim]") {
     float y = 100.0f;
     const auto state = collision.move_object(x, y, 16.0f, 24.0f, 24, 0, false);
     CHECK((state & sim::MOVE_HITWALL) == 0);
+}
+
+TEST_CASE("acid_damage matches legacy g_GetAcidHit table", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& acid1 = doc.panels.back();
+    acid1.type = map::PANEL_ACID1;
+    acid1.position = {100, 100};
+    acid1.size = {64, 64};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    CHECK(collision.acid_damage(110.0f, 110.0f, 16.0f, 24.0f) == 5);
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& acid2 = doc.panels.back();
+    acid2.type = map::PANEL_ACID2;
+    acid2.position = {100, 100};
+    acid2.size = {64, 64};
+
+    collision.build_from_map(doc);
+    CHECK(collision.acid_damage(110.0f, 110.0f, 16.0f, 24.0f) == 20);
+}
+
+TEST_CASE("trap closes on player and applies lethal damage", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& spike = doc.panels.back();
+    spike.type = map::PANEL_OPENDOOR;
+    spike.position = {100, 100};
+    spike.size = {16, 48};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trap = doc.triggers.back();
+    trap.type = map::TriggerType::CloseTrap;
+    trap.target_panel = 0;
+    trap.position = {90, 120};
+    trap.size = {16, 16};
+    trap.activate = map::ActivateType::PlayerPress;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(102.0f, 110.0f);
+    triggers.update(player, true);
+
+    CHECK_FALSE(player.alive());
+    CHECK(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("exit trigger requests map change", "[sim]") {
+    map::MapDocument doc;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& exit_trigger = doc.triggers.back();
+    exit_trigger.type = map::TriggerType::Exit;
+    exit_trigger.position = {0, 0};
+    exit_trigger.size = {32, 32};
+    exit_trigger.activate = map::ActivateType::PlayerCollide;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(4.0f, 4.0f);
+    triggers.update(player, false);
+
+    CHECK(triggers.consume_exit_request());
+    CHECK_FALSE(triggers.consume_exit_request());
+}
+
+TEST_CASE("GameWorld publishes PlayerLanded on ground contact", "[sim]") {
+    map::MapDocument doc;
+    doc.size = {256, 256};
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {256, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    ecs::GameWorld world;
+    world.reset_player(doc);
+    world.player().snap_to(100.0f, 120.0f);
+
+    d2df::EventBus bus;
+    int landed_count = 0;
+    bus.subscribe<events::PlayerLanded>([&](const events::PlayerLanded&) { ++landed_count; });
+
+    sim::PlayerInput none{};
+    for (int i = 0; i < 120; ++i) {
+        world.fixed_update(collision, none, &bus);
+    }
+
+    CHECK(landed_count >= 1);
+}
+
+TEST_CASE("floor trap closes on ACTIVATE_PLAYERCOLLIDE touch", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& spike = doc.panels.back();
+    spike.type = map::PANEL_OPENDOOR;
+    spike.position = {480, 592};
+    spike.size = {16, 48};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trap = doc.triggers.back();
+    trap.type = map::TriggerType::Trap;
+    trap.target_panel = 0;
+    trap.position = {480, 624};
+    trap.size = {16, 16};
+    trap.activate = map::ActivateType::PlayerCollide;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(471.0f, 588.0f);
+    triggers.update(player, false);
+
+    CHECK(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("veteran map08 trap corridor activates on touch", "[sim][integration]") {
+    const auto map_path =
+        std::filesystem::path(D2DF_SOURCE_DIR) / "assets/content/maps/veteran/map08.json";
+    if (!std::filesystem::exists(map_path)) {
+        SKIP("veteran map08 not available");
+    }
+
+    const auto doc = map::load_map_json_v1(map_path);
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(471.0f, 588.0f);
+    triggers.update(player, false);
+
+    CHECK(triggers.panels()[301].enabled);
+}
+
+TEST_CASE("veteran map08 player walking onto trap activates collide", "[sim][integration]") {
+    const auto map_path =
+        std::filesystem::path(D2DF_SOURCE_DIR) / "assets/content/maps/veteran/map08.json";
+    if (!std::filesystem::exists(map_path)) {
+        SKIP("veteran map08 not available");
+    }
+
+    const auto doc = map::load_map_json_v1(map_path);
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::MapCollision collision;
+    collision.build_from_panels(triggers.panels());
+
+    sim::PlayerState player;
+    player.snap_to(471.0f, 588.0f);
+
+    sim::PlayerInput walk_right{false, true, false};
+    bool trap_fired = false;
+
+    for (int i = 0; i < 30; ++i) {
+        collision.build_from_panels(triggers.panels());
+        player.fixed_update(collision, walk_right);
+        triggers.update(player, false, nullptr);
+        if (triggers.panels()[301].enabled) {
+            trap_fired = true;
+            break;
+        }
+    }
+
+    CHECK(trap_fired);
+}
+
+TEST_CASE("doom2d map08 Press expander closes floor traps on touch", "[sim][integration]") {
+    const auto map_path =
+        std::filesystem::path(D2DF_SOURCE_DIR) / "assets/content/maps/doom2d/map08.json";
+    if (!std::filesystem::exists(map_path)) {
+        SKIP("doom2d map08 not available");
+    }
+
+    const auto doc = map::load_map_json_v1(map_path);
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    CHECK_FALSE(triggers.panels()[270].enabled);
+    CHECK_FALSE(triggers.panels()[275].enabled);
+
+    sim::PlayerState player;
+    player.snap_to(983.0f, 204.0f);
+    triggers.update(player, false);
+
+    CHECK(triggers.panels()[270].enabled);
+    CHECK(triggers.panels()[275].enabled);
+}
+
+TEST_CASE("Press expander activates overlapping trigger after wait", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& door = doc.panels.back();
+    door.type = map::PANEL_CLOSEDOOR;
+    door.position = {100, 100};
+    door.size = {16, 64};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& open = doc.triggers.back();
+    open.type = map::TriggerType::OpenDoor;
+    open.target_panel = 0;
+    open.position = {90, 120};
+    open.size = {16, 16};
+    open.enabled = true;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& press = doc.triggers.back();
+    press.type = map::TriggerType::Press;
+    press.position = {80, 80};
+    press.size = {64, 64};
+    press.activate = map::ActivateType::None;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    triggers.update(player, false);
+
+    CHECK(triggers.panels()[0].enabled == false);
+}
+
+TEST_CASE("ACTIVATE_NOMONSTER Press expander fires without monsters", "[sim]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& door = doc.panels.back();
+    door.type = map::PANEL_CLOSEDOOR;
+    door.position = {200, 100};
+    door.size = {16, 64};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& open = doc.triggers.back();
+    open.type = map::TriggerType::OpenDoor;
+    open.target_panel = 0;
+    open.position = {210, 120};
+    open.size = {16, 16};
+    open.enabled = true;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& press = doc.triggers.back();
+    press.type = map::TriggerType::Press;
+    press.position = {180, 80};
+    press.size = {80, 80};
+    press.activate = map::ActivateType::NoMonster;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    triggers.update(player, false);
+
+    CHECK_FALSE(triggers.panels()[0].enabled);
 }

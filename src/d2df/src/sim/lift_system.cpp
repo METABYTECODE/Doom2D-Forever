@@ -29,31 +29,31 @@ bool panels_touch(const map::MapPanel& a, const map::MapPanel& b) {
 } // namespace
 
 void LiftSystem::reset(const std::vector<map::MapPanel>& panels) {
-    panels_ = panels;
     groups_.clear();
-    build_groups();
+    build_groups(panels);
 }
 
-void LiftSystem::apply_on_load(const std::vector<map::MapTrigger>& triggers) {
+void LiftSystem::apply_on_load(std::vector<map::MapPanel>& panels,
+                               const std::vector<map::MapTrigger>& triggers) {
     for (const auto& trigger : triggers) {
         if (!trigger.enabled || trigger.type == map::TriggerType::None ||
-            !map::has_activate_on_load(trigger.activate)) {
+            !map::has_activate_on_load(trigger.activate, trigger.type)) {
             continue;
         }
 
         const bool up = trigger.type != map::TriggerType::LiftDown;
         if (trigger.type == map::TriggerType::LiftUp || trigger.type == map::TriggerType::LiftDown) {
-            set_group_for_zone(trigger.target_panel, up);
+            set_group_for_zone(panels, trigger.target_panel, up);
         }
     }
 
     spdlog::info("LiftSystem: {} lift groups", groups_.size());
 }
 
-void LiftSystem::build_groups() {
+void LiftSystem::build_groups(const std::vector<map::MapPanel>& panels) {
     std::vector<std::size_t> lift_indices;
-    for (std::size_t i = 0; i < panels_.size(); ++i) {
-        const auto& panel = panels_[i];
+    for (std::size_t i = 0; i < panels.size(); ++i) {
+        const auto& panel = panels[i];
         if ((panel.flags & map::PANEL_FLAG_HIDE) != 0 || !is_lift_zone_type(panel.type)) {
             continue;
         }
@@ -78,9 +78,9 @@ void LiftSystem::build_groups() {
                     continue;
                 }
 
-                const auto& candidate_panel = panels_[lift_indices[candidate]];
+                const auto& candidate_panel = panels[lift_indices[candidate]];
                 for (const auto zone_index : group.zone_panels) {
-                    if (panels_touch(candidate_panel, panels_[zone_index])) {
+                    if (panels_touch(candidate_panel, panels[zone_index])) {
                         group.zone_panels.push_back(lift_indices[candidate]);
                         assigned[candidate] = true;
                         expanded = true;
@@ -94,9 +94,14 @@ void LiftSystem::build_groups() {
     }
 }
 
-void LiftSystem::set_group_direction(LiftGroup& group, bool up) {
+void LiftSystem::set_group_direction(std::vector<map::MapPanel>& panels, const LiftGroup& group,
+                                     bool up) {
     for (const auto zone_index : group.zone_panels) {
-        auto& zone = panels_[zone_index];
+        if (zone_index >= panels.size()) {
+            continue;
+        }
+
+        auto& zone = panels[zone_index];
         if (up) {
             zone.type = (zone.type & ~(map::PANEL_LIFTDOWN | map::PANEL_LIFTLEFT |
                                        map::PANEL_LIFTRIGHT)) |
@@ -109,24 +114,26 @@ void LiftSystem::set_group_direction(LiftGroup& group, bool up) {
     }
 }
 
-void LiftSystem::toggle_group_for_zone(std::int32_t zone_panel_index) {
-    for (auto& group : groups_) {
+void LiftSystem::toggle_group_for_zone(std::vector<map::MapPanel>& panels,
+                                       std::int32_t zone_panel_index) {
+    for (const auto& group : groups_) {
         for (const auto zone_index : group.zone_panels) {
             if (static_cast<std::int32_t>(zone_index) != zone_panel_index) {
                 continue;
             }
-            const bool up = (panels_[zone_index].type & map::PANEL_LIFTDOWN) != 0;
-            set_group_direction(group, up);
+            const bool up = (panels[zone_index].type & map::PANEL_LIFTDOWN) != 0;
+            set_group_direction(panels, group, up);
             return;
         }
     }
 }
 
-void LiftSystem::set_group_for_zone(std::int32_t zone_panel_index, bool up) {
-    for (auto& group : groups_) {
+void LiftSystem::set_group_for_zone(std::vector<map::MapPanel>& panels,
+                                    std::int32_t zone_panel_index, bool up) {
+    for (const auto& group : groups_) {
         for (const auto zone_index : group.zone_panels) {
             if (static_cast<std::int32_t>(zone_index) == zone_panel_index) {
-                set_group_direction(group, up);
+                set_group_direction(panels, group, up);
                 return;
             }
         }

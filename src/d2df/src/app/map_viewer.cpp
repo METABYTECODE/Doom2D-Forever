@@ -5,6 +5,8 @@
 
 #include <cmath>
 
+#include <d2df/core/event_bus.hpp>
+#include <d2df/core/game_events.hpp>
 #include <d2df/map/map_catalog.hpp>
 #include <d2df/map/map_json_loader.hpp>
 
@@ -35,9 +37,10 @@ std::size_t find_map_index(const std::vector<std::filesystem::path>& map_list,
 } // namespace
 
 MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
-                     std::filesystem::path map_path)
+                     std::filesystem::path map_path, EventBus* events)
     : renderer_(renderer)
-    , content_root_(std::move(content_root)) {
+    , content_root_(std::move(content_root))
+    , events_(events) {
     assets_.load(content_root_);
     text_.init(content_root_);
     map_list_ = map::list_map_json_files(content_root_);
@@ -217,10 +220,22 @@ void MapViewer::fixed_update() {
 
     sim::PlayerInput input{key_left_, key_right_, key_jump_};
     auto& player = world_.player();
-    triggers_.update(player, key_use_edge_);
-    key_use_edge_ = false;
     collision_.build_from_panels(triggers_.panels());
-    world_.fixed_update(collision_, input);
+    world_.fixed_update(collision_, input, events_);
+    triggers_.update(player, key_use_edge_, events_);
+    key_use_edge_ = false;
+
+    if (!player.alive()) {
+        world_.respawn_player();
+    }
+
+    if (triggers_.consume_exit_request()) {
+        if (events_ != nullptr) {
+            events_->publish(events::MapExitRequested{});
+        }
+        cycle_map(1);
+    }
+
     update_camera_follow();
 }
 
@@ -291,6 +306,8 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
 
     if (player.in_water()) {
         SDL_SetRenderDrawColor(renderer_, 48, 120, 200, 220);
+    } else if (player.in_acid()) {
+        SDL_SetRenderDrawColor(renderer_, 48, 200, 48, 220);
     } else if (player.on_lift()) {
         SDL_SetRenderDrawColor(renderer_, 200, 160, 48, 220);
     } else {
@@ -308,10 +325,13 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
     const std::string state = player.on_lift()    ? "lift"
                             : player.on_ground() ? "ground"
                             : player.in_water()  ? "water"
+                            : player.in_acid()   ? "acid"
                                                  : "air";
     const std::string hud = map_.name + "  (" + std::to_string(map_index_ + 1) + "/" +
-                            std::to_string(map_list_.size()) +
-                            ")  |  A/D move  Space jump  E use  PgUp/PgDn maps  C camera  " + state;
+                            std::to_string(map_list_.size()) + ")  HP " +
+                            std::to_string(player.health()) + "/" +
+                            std::to_string(sim::PlayerState::kMaxHealth) +
+                            "  |  A/D move  Space jump  E use  PgUp/PgDn maps  C camera  " + state;
     text_.draw(renderer_, hud, 8, viewport_h - 24);
 }
 

@@ -24,6 +24,11 @@ public:
                                       std::uint16_t mask) const;
     [[nodiscard]] bool on_ground(float x, float y, float width, float height) const;
     [[nodiscard]] bool in_liquid(float x, float y, float width, float height) const;
+    [[nodiscard]] bool in_water(float x, float y, float width, float height) const;
+    [[nodiscard]] bool in_acid(float x, float y, float width, float height) const;
+    /// Legacy g_GetAcidHit: 0, 5, 10, or 20 depending on acid panel overlap.
+    [[nodiscard]] int acid_damage(float x, float y, float width, float height) const;
+    [[nodiscard]] bool overlaps_solid(float x, float y, float width, float height) const;
 
     /// -1 = lift up, 0 = none, 1 = lift down (legacy CollideLift).
     [[nodiscard]] int vertical_lift_at(float x, float y, float width, float height) const;

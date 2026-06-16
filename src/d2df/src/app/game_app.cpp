@@ -141,7 +141,8 @@ bool GameApp::resolve_asset_paths() {
 
 bool GameApp::init_map_viewer() {
     try {
-        map_viewer_ = std::make_unique<MapViewer>(renderer_, config_.content_root, config_.map_path);
+        map_viewer_ = std::make_unique<MapViewer>(renderer_, config_.content_root, config_.map_path,
+                                                  events_.get());
         return true;
     } catch (const std::exception& ex) {
         show_fatal_error(ex.what());
@@ -174,7 +175,7 @@ void GameApp::process_frame() {
 
 int GameApp::run() {
     init_logging();
-    spdlog::info("Doom2D Forever — Phase 4 (player physics prototype)");
+    spdlog::info("Doom2D Forever — Phase 4 (player physics)");
 
     if (!init_sdl()) {
         return 1;

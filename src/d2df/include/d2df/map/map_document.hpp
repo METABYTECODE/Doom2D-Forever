@@ -48,6 +48,9 @@ struct MapTrigger {
     ActivateType activate = ActivateType::None;
     MapPoint press_position;
     MapSize press_size;
+    int press_wait = 0;
+    int press_count_required = 0;
+    bool ext_random = false;
     MapPoint teleport_target;
     bool d2d = false;
 };

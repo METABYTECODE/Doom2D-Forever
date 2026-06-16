@@ -102,6 +102,38 @@ bool MapCollision::in_liquid(float x, float y, float width, float height) const 
     return collides_panel(x, y, width, height * 2.0f / 3.0f, kLiquidMask);
 }
 
+bool MapCollision::in_water(float x, float y, float width, float height) const {
+    return collides_panel(x, y, width, height * 2.0f / 3.0f, map::PANEL_WATER);
+}
+
+bool MapCollision::in_acid(float x, float y, float width, float height) const {
+    return collides_panel(x, y, width, height, map::PANEL_ACID1 | map::PANEL_ACID2);
+}
+
+int MapCollision::acid_damage(float x, float y, float width, float height) const {
+    static constexpr int kDamageTable[] = {0, 5, 10, 20};
+    const bool acid1 = collides_panel(x, y, width, height, map::PANEL_ACID1);
+    const bool acid2 = collides_panel(x, y, width, height, map::PANEL_ACID2);
+    const int index = (acid1 ? 1 : 0) | (acid2 ? 2 : 0);
+    return kDamageTable[index];
+}
+
+bool MapCollision::overlaps_solid(float x, float y, float width, float height) const {
+    for (std::size_t i = 0; i < panels_.size(); ++i) {
+        const auto& panel = panels_[i];
+        if (!is_solid_panel(panel, i)) {
+            continue;
+        }
+        if (rects_overlap(x, y, width, height, static_cast<float>(panel.position.x),
+                          static_cast<float>(panel.position.y),
+                          static_cast<float>(panel.size.width),
+                          static_cast<float>(panel.size.height))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int MapCollision::vertical_lift_at(float x, float y, float width, float height) const {
     const bool lift_up = collides_panel(x, y, width, height, map::PANEL_LIFTUP);
     const bool lift_down = collides_panel(x, y, width, height, map::PANEL_LIFTDOWN);

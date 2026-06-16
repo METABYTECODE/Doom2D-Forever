@@ -37,6 +37,6 @@ enum class ActivateType : std::uint8_t {
 
 [[nodiscard]] TriggerType trigger_type_from_name(std::string_view name);
 [[nodiscard]] ActivateType activate_type_from_json(std::string_view activate_array_snippet);
-[[nodiscard]] bool has_activate_on_load(ActivateType flags);
+[[nodiscard]] bool has_activate_on_load(ActivateType flags, TriggerType type);
 
 } // namespace d2df::map

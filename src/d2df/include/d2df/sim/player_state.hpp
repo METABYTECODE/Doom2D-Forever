@@ -30,15 +30,28 @@ struct PlayerState {
     static constexpr int kVelJump = 10;
     static constexpr int kVelSwim = 4;
 
+    static constexpr int kMaxHealth = 100;
+    static constexpr int kTrapDamage = 1000;
+    static constexpr int kAcidDamagePeriod = 15;
+
     void snap_to(float spawn_x, float spawn_y);
     void begin_tick();
     void fixed_update(const MapCollision& collision, PlayerInput input);
 
     [[nodiscard]] bool on_ground() const { return on_ground_; }
     [[nodiscard]] bool in_water() const { return in_water_; }
+    [[nodiscard]] bool in_acid() const { return in_acid_; }
     [[nodiscard]] bool on_lift() const { return on_lift_; }
+    [[nodiscard]] bool alive() const { return health_ > 0; }
+    [[nodiscard]] int health() const { return health_; }
+    [[nodiscard]] int tick() const { return tick_; }
     [[nodiscard]] float render_x(float alpha) const;
     [[nodiscard]] float render_y(float alpha) const;
+
+    /// @return true if the player died from this hit.
+    bool apply_damage(int amount);
+
+    void restore_health();
 
 private:
     void apply_run(bool left, bool right);
@@ -46,8 +59,10 @@ private:
     static int z_dec(int value, int amount);
 
     int tick_ = 0;
+    int health_ = kMaxHealth;
     bool on_ground_ = false;
     bool in_water_ = false;
+    bool in_acid_ = false;
     bool on_lift_ = false;
 };
 

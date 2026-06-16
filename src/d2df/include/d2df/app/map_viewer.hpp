@@ -3,6 +3,7 @@
 #include <SDL_scancode.h>
 
 #include <d2df/core/fixed_timestep.hpp>
+#include <d2df/core/game_events.hpp>
 #include <d2df/ecs/game_world.hpp>
 #include <d2df/map/map_document.hpp>
 #include <d2df/render/camera2d.hpp>
@@ -22,10 +23,12 @@ struct SDL_Renderer;
 
 namespace d2df {
 
+class EventBus;
+
 class MapViewer {
 public:
     MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
-              std::filesystem::path map_path);
+              std::filesystem::path map_path, EventBus* events = nullptr);
 
     void handle_key_down(int sym, SDL_Scancode scancode);
     void handle_key_up(int sym);
@@ -66,6 +69,7 @@ private:
     bool key_use_ = false;
     bool key_use_edge_ = false;
     float camera_move_speed_ = 480.0f;
+    EventBus* events_ = nullptr;
 };
 
 } // namespace d2df

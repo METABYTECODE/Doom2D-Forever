@@ -27,7 +27,21 @@ void PlayerState::snap_to(float spawn_x, float spawn_y) {
     tick_ = 0;
     on_ground_ = false;
     in_water_ = false;
+    in_acid_ = false;
     on_lift_ = false;
+    health_ = kMaxHealth;
+}
+
+bool PlayerState::apply_damage(int amount) {
+    if (amount <= 0 || !alive()) {
+        return false;
+    }
+    health_ = std::max(0, health_ - amount);
+    return !alive();
+}
+
+void PlayerState::restore_health() {
+    health_ = kMaxHealth;
 }
 
 void PlayerState::begin_tick() {
@@ -150,6 +164,7 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
         collision.move_object(x, y, width, height, dx, dy, true);
 
     in_water_ = (move_state & MOVE_INWATER) != 0;
+    in_acid_ = collision.in_acid(x, y, width, height);
     on_ground_ = collision.on_ground(x, y, width, height);
     if (!on_lift_) {
         on_lift_ = collision.vertical_lift_at(x, y, width, height) != 0 ||

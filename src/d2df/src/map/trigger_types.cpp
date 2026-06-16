@@ -86,8 +86,19 @@ ActivateType activate_type_from_json(std::string_view snippet) {
     return flags;
 }
 
-bool has_activate_on_load(ActivateType flags) {
-    return flags == ActivateType::None;
+bool has_activate_on_load(ActivateType flags, TriggerType type) {
+    if (flags != ActivateType::None) {
+        return false;
+    }
+    switch (type) {
+    case TriggerType::Press:
+    case TriggerType::On:
+    case TriggerType::Off:
+    case TriggerType::OnOff:
+        return true;
+    default:
+        return false;
+    }
 }
 
 } // namespace d2df::map

@@ -18,6 +18,12 @@ std::int32_t read_i32(std::span<const std::uint8_t> data, std::size_t offset) {
     return value;
 }
 
+std::uint16_t read_u16(std::span<const std::uint8_t> data, std::size_t offset) {
+    std::uint16_t value = 0;
+    std::memcpy(&value, data.data() + offset, sizeof(value));
+    return value;
+}
+
 std::string rewrite_resource_ref(const d2df::resources::ContentCatalog& catalog,
                                  std::string_view field, std::string_view legacy_ref,
                                  std::string_view map_legacy_ref,
@@ -122,6 +128,24 @@ void write_trigger_data(std::ostringstream& out, const LegacyTrigger& trigger,
         out << "\"silent\":" << (data[4] != 0 ? "true" : "false");
         comma();
         out << "\"d2d\":" << (data[5] != 0 ? "true" : "false");
+        break;
+    }
+    case 9:  // TRIGGER_PRESS
+    case 15: // TRIGGER_ON
+    case 16: // TRIGGER_OFF
+    case 17: { // TRIGGER_ONOFF
+        comma();
+        out << "\"position\":";
+        write_point(out, {read_i32(data, 0), read_i32(data, 4)});
+        comma();
+        out << "\"size\":";
+        write_size(out, {read_u16(data, 8), read_u16(data, 10)});
+        comma();
+        out << "\"wait\":" << read_u16(data, 12);
+        comma();
+        out << "\"count\":" << read_u16(data, 14);
+        comma();
+        out << "\"ext_random\":" << (data[20] != 0 ? "true" : "false");
         break;
     }
     case 18: { // TRIGGER_SOUND

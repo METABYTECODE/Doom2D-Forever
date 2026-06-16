@@ -14,9 +14,9 @@
 | **Phase 1b** — organize | ✅ **Готово** (нужен re-run после последних фиксов extract) |
 | **Phase 2b** — maps + AssetDatabase | ✅ **Готово** |
 | **Phase 3** — map viewer (SDL MVP) | ✅ **Готово** |
-| **Phase 4** — physics & player | 🔄 **В работе** (прототип: AABB + WASD) |
+| **Phase 4** — physics & player | ✅ **Готово** |
 
-**Следующий шаг:** Phase 4 — EnTT, spawn из карты, gravity/jump, step/water panels.
+**Следующий шаг:** Phase 5 — weapons, projectiles, combat events.
 
 ---
 
@@ -250,20 +250,24 @@ REM или: build\src\d2df_client\Release\d2df.exe --map assets\content\maps\doo
 
 ---
 
-## Phase 4 — в работе 🔄
+## Phase 4 — завершено ✅
 
 | Задача | Статус |
 |--------|--------|
 | Map collision (wall/closedoor/blockmon AABB) | ✅ |
-| PlayerState + port g_Obj_Move (gravity, run, jump) | ✅ прототип |
-| Step / water panels | ✅ базово |
+| PlayerState + port g_Obj_Move (gravity, run, jump) | ✅ |
+| Step / water / acid panels | ✅ |
 | Spawn from AREA_PLAYERPOINT1/2 | ✅ |
 | EnTT GameWorld + Transform/Velocity | ✅ |
-| Input → movement (A/D, Space) | ✅ |
+| Input → movement (A/D, Space, E use) | ✅ |
 | Camera follow player | ✅ |
-| Moving panels (doors, lifts) | ❌ |
-| Acid damage / events | ❌ |
-| Slope climb polish | 🔄 частично |
+| Moving panels (doors, lifts, traps, teleports) | ✅ |
+| Acid damage + trap crush damage | ✅ |
+| Exit trigger → next map | ✅ |
+| EventBus: PlayerLanded, liquid, damage, MapExit | ✅ |
+| Slope climb | ✅ базово |
+
+**Следующий шаг:** Phase 5 — combat (weapons, projectiles, HP UI).
 
 ---
 

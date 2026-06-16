@@ -489,6 +489,9 @@ std::vector<MapTrigger> parse_triggers(std::string_view json) {
             trigger.teleport_target = parse_point(*data, "target");
             trigger.press_position = parse_point(*data, "position");
             trigger.press_size = parse_size(*data, "size");
+            trigger.press_wait = json_extract_int(*data, "wait").value_or(0);
+            trigger.press_count_required = json_extract_int(*data, "count").value_or(0);
+            trigger.ext_random = json_extract_bool(*data, "ext_random").value_or(false);
             trigger.d2d = json_extract_bool(*data, "d2d").value_or(false);
         }
 
