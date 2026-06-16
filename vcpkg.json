@@ -4,6 +4,7 @@
   "description": "Modern C++ rewrite of Doom2D Forever",
   "dependencies": [
     "sdl2",
+    "sdl2-mixer",
     "sdl2-ttf",
     "entt",
     "spdlog",

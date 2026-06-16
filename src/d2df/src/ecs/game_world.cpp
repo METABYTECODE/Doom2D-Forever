@@ -1,10 +1,13 @@
 #include <d2df/ecs/game_world.hpp>
 
+#include <algorithm>
+
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/ecs/components/network_identity.hpp>
 #include <d2df/map/map_spawn.hpp>
 #include <d2df/map/monster_types.hpp>
+#include <d2df/sim/combat_common.hpp>
 
 namespace d2df::ecs {
 namespace {
@@ -53,7 +56,7 @@ void GameWorld::reset_player(const map::MapDocument& map) {
 }
 
 void GameWorld::spawn_map_monsters(const map::MapDocument& map) {
-    EntityId next_id = kDebugTargetBaseId;
+    next_monster_id_ = kDebugTargetBaseId;
     for (const auto& map_monster : map.monsters) {
         if (map_monster.type == map::MonsterType::None) {
             continue;
@@ -61,10 +64,12 @@ void GameWorld::spawn_map_monsters(const map::MapDocument& map) {
 
         const auto stats = map::monster_stats(map_monster.type);
         sim::ShootableTarget target;
-        target.id = next_id++;
+        target.id = next_monster_id_++;
         target.monster_type = map_monster.type;
         target.x = static_cast<float>(map_monster.position.x);
         target.y = static_cast<float>(map_monster.position.y);
+        target.prev_x = target.x;
+        target.prev_y = target.y;
         target.width = stats.width;
         target.height = stats.height;
         target.max_health = stats.health;
@@ -116,10 +121,15 @@ void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInpu
     publish_liquid_events(was_water, was_acid, events);
     apply_environment_damage(collision, events);
 
+    monsters_.tick(collision, player_, targets_, events, &projectiles_, &next_monster_id_);
+
     weapons_.tick(player_, collision, input, targets_, triggers, &projectiles_, kPlayerEntityId,
                   events, map_width);
 
     projectiles_.tick(collision, triggers, player_, targets_, events, map_width, map_height);
+
+    handle_monster_death_effects(collision, events, triggers);
+    purge_dead_monsters();
 
     items_.tick(player_, &collision, events);
 
@@ -167,6 +177,62 @@ void GameWorld::publish_landed_event(bool was_on_ground, EventBus* events) {
         return;
     }
     events->publish(events::PlayerLanded{player_.x, player_.y});
+}
+
+void GameWorld::purge_dead_monsters() {
+    targets_.erase(std::remove_if(targets_.begin(), targets_.end(),
+                                  [](const sim::ShootableTarget& target) {
+                                      return target.is_monster() && !target.alive() &&
+                                             map::monster_vanishes_on_death(target.monster_type);
+                                  }),
+                   targets_.end());
+}
+
+void GameWorld::handle_monster_death_effects(const sim::MapCollision& /*collision*/,
+                                             EventBus* events, sim::TriggerSystem* triggers) {
+    constexpr float kBarrelExplosionRadius = 60.0f;
+    constexpr int kBarrelExplosionDamage = 100;
+
+    bool processed_death = true;
+    while (processed_death) {
+        processed_death = false;
+        for (auto& target : targets_) {
+            if (!target.is_monster() || target.alive() || target.death_handled) {
+                continue;
+            }
+
+            target.death_handled = true;
+            processed_death = true;
+
+            const float center_x = target.x + target.width * 0.5f;
+            const float center_y = target.y + target.height * 0.5f;
+
+            if (target.monster_type == map::MonsterType::Barrel) {
+                sim::apply_area_explosion(center_x, center_y - 16.0f, kBarrelExplosionRadius,
+                                          kBarrelExplosionDamage, player_, targets_, target.id,
+                                          events, events::DamageSource::Projectile, triggers);
+            } else if (target.monster_type == map::MonsterType::Pain) {
+                for (int i = 0; i < 3; ++i) {
+                    const float offset_x = static_cast<float>((i * 11) - 15);
+                    const float offset_y = static_cast<float>((i * 5) - 7);
+                    const auto stats = map::monster_stats(map::MonsterType::Soul);
+                    sim::ShootableTarget soul;
+                    soul.id = next_monster_id_++;
+                    soul.monster_type = map::MonsterType::Soul;
+                    soul.x = center_x + offset_x - stats.width * 0.5f;
+                    soul.y = center_y + offset_y;
+                    soul.prev_x = soul.x;
+                    soul.prev_y = soul.y;
+                    soul.width = stats.width;
+                    soul.height = stats.height;
+                    soul.max_health = stats.health;
+                    soul.health = stats.health;
+                    soul.aggro_player = true;
+                    targets_.push_back(soul);
+                }
+            }
+        }
+    }
 }
 
 void GameWorld::sync_to_ecs() {

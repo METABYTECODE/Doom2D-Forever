@@ -76,4 +76,8 @@ struct ItemRespawned {
     float y = 0.f;
 };
 
+struct PlayerTeleported {
+    bool blocked = false;
+};
+
 } // namespace d2df::events

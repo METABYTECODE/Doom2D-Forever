@@ -5,6 +5,7 @@
 
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
+#include <d2df/core/types.hpp>
 #include <d2df/sim/combat_common.hpp>
 #include <d2df/sim/trigger_system.hpp>
 
@@ -22,6 +23,9 @@ constexpr int kPlasmaLifetime = 550;
 constexpr int kRocketExplosionRadius = 60;
 constexpr int kRocketExplosionDamage = 80;
 constexpr int kPlasmaDamage = 5;
+constexpr int kMonsterShotDamage = 4;
+constexpr int kMonsterShotSpeed = 10;
+constexpr int kMonsterShotLifetime = 400;
 constexpr int kRocketDirectDamage = 10;
 constexpr float kBfgWidth = 32.0f;
 constexpr float kBfgHeight = 32.0f;
@@ -75,6 +79,9 @@ bool overlaps_any_target(const Projectile& projectile, const std::vector<Shootab
         if (!targets[i].alive()) {
             continue;
         }
+        if (targets[i].id == projectile.shooter_id) {
+            continue;
+        }
         if (rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height,
                           targets[i].x, targets[i].y, targets[i].width, targets[i].height)) {
             target_index = i;
@@ -82,6 +89,20 @@ bool overlaps_any_target(const Projectile& projectile, const std::vector<Shootab
         }
     }
     return false;
+}
+
+void publish_player_projectile_damage(EventBus* events, int amount, int health_remaining) {
+    if (events == nullptr || amount <= 0) {
+        return;
+    }
+    events->publish(events::PlayerDamaged{amount, events::DamageSource::Projectile,
+                                          health_remaining});
+    events->publish(events::EntityDamaged{kPlayerEntityId, 0, amount,
+                                          events::DamageSource::Projectile, health_remaining});
+    if (health_remaining <= 0) {
+        events->publish(events::PlayerDied{events::DamageSource::Projectile});
+        events->publish(events::EntityDied{kPlayerEntityId, events::DamageSource::Projectile});
+    }
 }
 
 } // namespace
@@ -160,6 +181,24 @@ void ProjectileSystem::spawn_bfg(float muzzle_x, float muzzle_y, float aim_x, fl
     float spawn_y = 0.0f;
     compute_spawn_pose(muzzle_x, muzzle_y, aim_x, aim_y, kBfgWidth, kBfgHeight, spawn_x, spawn_y);
     launch_projectile(index, spawn_x, spawn_y, aim_x, aim_y, kBfgSpeed, kBfgLifetime);
+}
+
+void ProjectileSystem::spawn_monster_shot(float x, float y, float aim_x, float aim_y,
+                                          EntityId shooter_id) {
+    const std::size_t index = allocate_slot();
+    auto& projectile = projectiles_[index];
+    projectile.active = true;
+    projectile.weapon = WeaponId::Plasma;
+    projectile.shooter_id = shooter_id;
+    projectile.width = kPlasmaWidth;
+    projectile.height = kPlasmaHeight;
+    projectile.x = x;
+    projectile.y = y;
+    projectile.prev_x = x;
+    projectile.prev_y = y;
+    set_velocity_toward(projectile, x, y, aim_x, aim_y, kMonsterShotSpeed);
+    projectile.timeout = kMonsterShotLifetime;
+    projectile.spawn_grace_ticks = 2;
 }
 
 void ProjectileSystem::destroy_projectile(std::size_t index) {
@@ -270,10 +309,23 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
     const bool hit_target =
         can_collide && overlaps_any_target(projectile, targets, hit_target_index);
 
+    if (can_collide && projectile.weapon == WeaponId::Plasma &&
+        projectile.shooter_id != kPlayerEntityId && player.alive() &&
+        rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height, player.x,
+                      player.y, player.width, player.height)) {
+        const int health_before = player.health();
+        player.apply_damage(kMonsterShotDamage);
+        publish_player_projectile_damage(events, health_before - player.health(), player.health());
+        destroy_projectile(index);
+        return;
+    }
+
     if (hit_target && projectile.weapon == WeaponId::Plasma) {
         auto& target = targets[hit_target_index];
+        const int damage =
+            projectile.shooter_id == kPlayerEntityId ? kPlasmaDamage : kMonsterShotDamage;
         const int health_before = target.health;
-        target.apply_damage(kPlasmaDamage);
+        target.apply_damage(damage, projectile.shooter_id);
         publish_entity_damage(events, target.id, projectile.shooter_id,
                               health_before - target.health, events::DamageSource::Projectile,
                               target.health);
@@ -286,7 +338,7 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
             if (hit_target) {
                 auto& target = targets[hit_target_index];
                 const int health_before = target.health;
-                target.apply_damage(kRocketDirectDamage);
+                target.apply_damage(kRocketDirectDamage, projectile.shooter_id);
                 publish_entity_damage(events, target.id, projectile.shooter_id,
                                       health_before - target.health,
                                       events::DamageSource::Projectile, target.health);
@@ -301,7 +353,7 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
             if (hit_target) {
                 auto& target = targets[hit_target_index];
                 const int health_before = target.health;
-                target.apply_damage(kBfgDirectDamage);
+                target.apply_damage(kBfgDirectDamage, projectile.shooter_id);
                 publish_entity_damage(events, target.id, projectile.shooter_id,
                                       health_before - target.health,
                                       events::DamageSource::Projectile, target.health);

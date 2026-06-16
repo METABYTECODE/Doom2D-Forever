@@ -2,6 +2,8 @@
 
 #include <SDL_scancode.h>
 
+#include <d2df/audio/sound_system.hpp>
+#include <d2df/core/event_bus.hpp>
 #include <d2df/core/fixed_timestep.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/ecs/game_world.hpp>
@@ -78,6 +80,7 @@ private:
     int weapon_select_request_ = -1;
     float camera_move_speed_ = 480.0f;
     EventBus* events_ = nullptr;
+    audio::SoundSystem sound_;
 };
 
 } // namespace d2df

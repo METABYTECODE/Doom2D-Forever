@@ -390,6 +390,22 @@ bool TriggerSystem::any_monsters_in_trigger(
     return false;
 }
 
+bool TriggerSystem::try_teleport_player(PlayerState& player, float tx, float ty,
+                                       EventBus* events) {
+    if (active_collision_ != nullptr &&
+        active_collision_->overlaps_solid(tx, ty, PlayerState::width, PlayerState::height)) {
+        if (events != nullptr) {
+            events->publish(events::PlayerTeleported{true});
+        }
+        return false;
+    }
+    player.snap_to(tx, ty);
+    if (events != nullptr) {
+        events->publish(events::PlayerTeleported{false});
+    }
+    return true;
+}
+
 void TriggerSystem::try_activate_trigger(std::size_t trigger_index, PlayerState& player,
                                            EventBus* events,
                                            const std::vector<ShootableTarget>* /*monsters*/) {
@@ -504,7 +520,7 @@ void TriggerSystem::activate_trigger(std::size_t trigger_index, PlayerState& pla
             tx -= PlayerState::width * 0.5f;
             ty -= PlayerState::height;
         }
-        player.snap_to(tx, ty);
+        (void)try_teleport_player(player, tx, ty, events);
         break;
     }
     case map::TriggerType::OpenDoor:
@@ -601,7 +617,9 @@ void TriggerSystem::apply_on_load_triggers() {
 }
 
 void TriggerSystem::update(PlayerState& player, bool use_pressed, EventBus* events,
-                           const std::vector<ShootableTarget>* monsters) {
+                           const std::vector<ShootableTarget>* monsters,
+                           const MapCollision* collision) {
+    active_collision_ = collision;
     tick_door_timers();
 
     for (std::size_t i = 0; i < triggers_.size(); ++i) {
@@ -651,6 +669,7 @@ void TriggerSystem::update(PlayerState& player, bool use_pressed, EventBus* even
     }
 
     tick_expanders(player, events);
+    active_collision_ = nullptr;
 }
 
 map::MapDocument TriggerSystem::map_view(const map::MapDocument& base) const {

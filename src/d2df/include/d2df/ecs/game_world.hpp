@@ -1,8 +1,10 @@
 #pragma once
 
+#include <d2df/core/types.hpp>
 #include <d2df/ecs/components/transform.hpp>
 #include <d2df/map/map_document.hpp>
 #include <d2df/sim/item_system.hpp>
+#include <d2df/sim/monster_system.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/projectile_system.hpp>
@@ -18,7 +20,6 @@ namespace d2df {
 
 class EventBus;
 
-constexpr EntityId kPlayerEntityId = 1;
 constexpr EntityId kDebugTargetBaseId = 100;
 
 } // namespace d2df
@@ -36,6 +37,7 @@ public:
     [[nodiscard]] std::vector<sim::ShootableTarget>& targets() { return targets_; }
     [[nodiscard]] const std::vector<sim::ShootableTarget>& targets() const { return targets_; }
     [[nodiscard]] const sim::ProjectileSystem& projectiles() const { return projectiles_; }
+    [[nodiscard]] sim::ProjectileSystem& projectiles() { return projectiles_; }
     [[nodiscard]] const sim::ItemSystem& items() const { return items_; }
     [[nodiscard]] entt::registry& registry() { return registry_; }
     [[nodiscard]] EntityId player_entity_id() const { return kPlayerEntityId; }
@@ -49,6 +51,9 @@ private:
     void apply_environment_damage(const sim::MapCollision& collision, EventBus* events);
     void publish_liquid_events(bool was_water, bool was_acid, EventBus* events);
     void publish_landed_event(bool was_on_ground, EventBus* events);
+    void purge_dead_monsters();
+    void handle_monster_death_effects(const sim::MapCollision& collision, EventBus* events,
+                                      sim::TriggerSystem* triggers);
 
     entt::registry registry_;
     entt::entity player_entity_{entt::null};
@@ -56,7 +61,9 @@ private:
     sim::WeaponSystem weapons_;
     sim::ProjectileSystem projectiles_;
     sim::ItemSystem items_;
+    sim::MonsterSystem monsters_;
     std::vector<sim::ShootableTarget> targets_;
+    EntityId next_monster_id_ = kDebugTargetBaseId;
     std::optional<map::MapPoint> spawn_point_;
 };
 

@@ -79,6 +79,7 @@ add_library(d2df_sim STATIC
     src/sim/combat_common.cpp
     src/sim/item_system.cpp
     src/sim/map_collision.cpp
+    src/sim/monster_system.cpp
     src/sim/player_state.cpp
     src/sim/lift_system.cpp
     src/sim/projectile_system.cpp
@@ -103,6 +104,26 @@ target_link_libraries(d2df_sim
 )
 
 d2df_set_warnings(d2df_sim)
+
+add_library(d2df_audio STATIC
+    src/audio/sound_system.cpp
+)
+
+add_library(d2df::audio ALIAS d2df_audio)
+
+target_include_directories(d2df_audio
+    PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
+target_link_libraries(d2df_audio
+    PUBLIC
+        d2df::core
+        d2df::resources
+        SDL2_mixer::SDL2_mixer
+)
+
+d2df_set_warnings(d2df_audio)
 
 add_library(d2df_render STATIC
     src/render/camera2d.cpp
@@ -146,6 +167,7 @@ target_link_libraries(d2df_app
         d2df::render
         d2df::map
         d2df::sim
+        d2df::audio
         d2df::resources
         SDL2::SDL2
 )

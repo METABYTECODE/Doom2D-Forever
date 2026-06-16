@@ -41,6 +41,7 @@ public:
     void spawn_rocket(float x, float y, float aim_x, float aim_y, EntityId shooter_id);
     void spawn_plasma(float x, float y, float aim_x, float aim_y, EntityId shooter_id);
     void spawn_bfg(float x, float y, float aim_x, float aim_y, EntityId shooter_id);
+    void spawn_monster_shot(float x, float y, float aim_x, float aim_y, EntityId shooter_id);
 
     void tick(const MapCollision& collision, TriggerSystem* triggers, PlayerState& player,
               std::vector<ShootableTarget>& targets, EventBus* events, int map_width,

@@ -21,7 +21,8 @@ class TriggerSystem {
 public:
     void reset(const map::MapDocument& map);
     void update(PlayerState& player, bool use_pressed, EventBus* events = nullptr,
-                const std::vector<ShootableTarget>* monsters = nullptr);
+                const std::vector<ShootableTarget>* monsters = nullptr,
+                const MapCollision* collision = nullptr);
 
     void press_shot_line(float x1, float y1, float x2, float y2, PlayerState& player,
                          EventBus* events, const std::vector<ShootableTarget>* monsters = nullptr);
@@ -41,6 +42,8 @@ private:
     void activate_trigger(std::size_t trigger_index, PlayerState& player, EventBus* events);
     void try_activate_trigger(std::size_t trigger_index, PlayerState& player, EventBus* events,
                               const std::vector<ShootableTarget>* monsters);
+    [[nodiscard]] bool try_teleport_player(PlayerState& player, float tx, float ty,
+                                           EventBus* events);
     void set_door_group_open(std::int32_t panel_index, bool open);
     void close_trap_group(std::int32_t panel_index, PlayerState& player, EventBus* events);
     void tick_door_timers();
@@ -77,6 +80,7 @@ private:
     std::vector<std::pair<std::int32_t, int>> door5_timers_;
     bool exit_requested_ = false;
     LiftSystem lift_;
+    const MapCollision* active_collision_ = nullptr;
 };
 
 } // namespace d2df::sim

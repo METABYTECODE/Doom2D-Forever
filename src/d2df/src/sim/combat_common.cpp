@@ -5,6 +5,9 @@
 
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
+#include <d2df/core/types.hpp>
+#include <d2df/sim/player_state.hpp>
+#include <d2df/sim/trigger_system.hpp>
 
 namespace d2df::sim {
 
@@ -72,6 +75,97 @@ bool segment_intersects_aabb(float x0, float y0, float x1, float y1, float bx, f
     return segment_intersects_aabb(x0, y0, x1, y1, bx, by, bw, bh, hit_x, hit_y, dist_sq);
 }
 
+namespace {
+
+int chebyshev_distance(float dx, float dy) {
+    dx = std::clamp(dx, -1000.0f, 1000.0f);
+    dy = std::clamp(dy, -1000.0f, 1000.0f);
+    const int ax = static_cast<int>(std::abs(dx));
+    const int ay = static_cast<int>(std::abs(dy));
+    return std::max(ax, ay);
+}
+
+void publish_player_explosion_damage(EventBus* events, int amount, int health_remaining) {
+    if (events == nullptr || amount <= 0) {
+        return;
+    }
+    events->publish(events::PlayerDamaged{amount, events::DamageSource::Projectile, health_remaining});
+    events->publish(events::EntityDamaged{kPlayerEntityId, 0, amount, events::DamageSource::Projectile,
+                                         health_remaining});
+    if (health_remaining <= 0) {
+        events->publish(events::PlayerDied{events::DamageSource::Projectile});
+        events->publish(events::EntityDied{kPlayerEntityId, events::DamageSource::Projectile});
+    }
+}
+
+} // namespace
+
+void apply_area_explosion(float cx, float cy, float radius, int max_player_damage,
+                          PlayerState& player, std::vector<ShootableTarget>& targets,
+                          EntityId source_id, EventBus* events, events::DamageSource source,
+                          TriggerSystem* triggers) {
+    if (radius <= 0.0f) {
+        return;
+    }
+
+    if (triggers != nullptr) {
+        triggers->press_shot_circle(cx, cy, radius, player, events);
+    }
+
+    const float radius_sq = radius * radius;
+    const int radius_i = static_cast<int>(radius);
+
+    if (player.alive()) {
+        const float dx = player.x + player.width * 0.5f - cx;
+        const float dy = player.y + player.height * 0.5f - cy;
+        if (dx * dx + dy * dy < radius_sq) {
+            int mm = chebyshev_distance(dx, dy);
+            if (mm == 0) {
+                mm = 1;
+            }
+            const int damage = (max_player_damage * (radius_i - mm)) / radius_i;
+            if (damage > 0) {
+                const int health_before = player.health();
+                player.apply_damage(damage);
+                publish_player_explosion_damage(events, health_before - player.health(),
+                                                player.health());
+                player.vel_x += (static_cast<int>(dx) * 7) / mm;
+                player.vel_y += (static_cast<int>(dy) * 7) / mm;
+            }
+        }
+    }
+
+    for (auto& target : targets) {
+        if (!target.alive()) {
+            continue;
+        }
+
+        const float dx = target.x + target.width * 0.5f - cx;
+        const float dy = target.y + target.height * 0.5f - cy;
+        if (dx * dx + dy * dy >= radius_sq) {
+            continue;
+        }
+
+        int mm = chebyshev_distance(dx, dy);
+        if (mm == 0) {
+            mm = 1;
+        }
+
+        const int base_damage = (static_cast<int>(target.width) / 4) * 10;
+        const int damage = (base_damage * (radius_i - mm)) / radius_i;
+        if (damage <= 0) {
+            continue;
+        }
+
+        const int health_before = target.health;
+        target.apply_damage(damage, source_id);
+        publish_entity_damage(events, target.id, source_id, health_before - target.health, source,
+                              target.health);
+        target.vel_x += (static_cast<int>(dx) * 7) / mm;
+        target.vel_y += (static_cast<int>(dy) * 7) / mm;
+    }
+}
+
 void publish_entity_damage(EventBus* events, EntityId target_id, EntityId source_id, int amount,
                            events::DamageSource source, int health_remaining) {
     if (events == nullptr || amount <= 0) {
@@ -113,7 +207,7 @@ void apply_damage_to_targets(std::vector<ShootableTarget>& targets, float cx, fl
         }
 
         const int health_before = target.health;
-        target.apply_damage(damage);
+        target.apply_damage(damage, source_id);
         publish_entity_damage(events, target.id, source_id, health_before - target.health, source,
                               target.health);
     }
@@ -154,7 +248,7 @@ bool damage_targets_along_ray(std::vector<ShootableTarget>& targets, float x0, f
     for (const auto& candidate : candidates) {
         auto& target = targets[candidate.index];
         const int health_before = target.health;
-        target.apply_damage(damage);
+        target.apply_damage(damage, source_id);
         const int dealt = health_before - target.health;
         publish_entity_damage(events, target.id, source_id, dealt, source, target.health);
         if (dealt > 0) {

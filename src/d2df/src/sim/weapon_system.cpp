@@ -34,7 +34,7 @@ void fire_melee_box(std::vector<ShootableTarget>& targets, EntityId shooter_id, 
             continue;
         }
         const int health_before = target.health;
-        target.apply_damage(damage);
+        target.apply_damage(damage, shooter_id);
         publish_entity_damage(events, target.id, shooter_id, health_before - target.health, source,
                               target.health);
         return;
@@ -135,7 +135,7 @@ void WeaponSystem::fire_melee(PlayerState& player, std::vector<ShootableTarget>&
             continue;
         }
         const int health_before = target.health;
-        target.apply_damage(damage);
+        target.apply_damage(damage, shooter_id);
         publish_entity_damage(events, target.id, shooter_id, health_before - target.health, source,
                               target.health);
         return;

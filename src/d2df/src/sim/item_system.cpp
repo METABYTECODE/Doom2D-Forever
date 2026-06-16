@@ -316,9 +316,42 @@ bool should_remove_item(const WorldItem& item, map::ItemType type, const PlayerS
 }
 
 void tick_falling_item(WorldItem& item, const MapCollision& collision) {
-    item.vel_y += 1;
-    if (item.vel_y > PlayerState::kMaxYVel) {
-        item.vel_y = PlayerState::kMaxYVel;
+    switch (collision.vertical_lift_at(item.x, item.y, item.width, item.height)) {
+    case -1:
+        item.vel_y -= 1;
+        if (item.vel_y < -5) {
+            item.vel_y += 1;
+        }
+        break;
+    case 1:
+        if (item.vel_y > 5) {
+            item.vel_y -= 1;
+        }
+        item.vel_y += 1;
+        break;
+    default:
+        item.vel_y += 1;
+        if (item.vel_y > PlayerState::kMaxYVel) {
+            item.vel_y = PlayerState::kMaxYVel;
+        }
+        break;
+    }
+
+    switch (collision.horizontal_lift_at(item.x, item.y, item.width, item.height)) {
+    case -1:
+        item.vel_x -= 3;
+        if (item.vel_x < -9) {
+            item.vel_x += 3;
+        }
+        break;
+    case 1:
+        item.vel_x += 3;
+        if (item.vel_x > 9) {
+            item.vel_x -= 3;
+        }
+        break;
+    default:
+        break;
     }
 
     float x = item.x;

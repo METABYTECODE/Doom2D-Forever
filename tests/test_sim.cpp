@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 
+#include <d2df/core/types.hpp>
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/fixed_timestep.hpp>
 #include <d2df/core/game_events.hpp>
@@ -20,6 +22,7 @@
 #endif
 #include <d2df/sim/item_system.hpp>
 #include <d2df/sim/game_rules.hpp>
+#include <d2df/sim/monster_system.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/projectile_system.hpp>
@@ -983,8 +986,8 @@ TEST_CASE("super chaingun hitscan damages shootable target", "[sim][combat]") {
     give_ammo(player.combat(), sim::AmmoType::Shells, 10);
 
     std::vector<sim::ShootableTarget> targets;
-    targets.push_back(sim::ShootableTarget{101, map::MonsterType::None, 200.0f, 108.0f, 32.0f,
-                                           32.0f, 100, 100});
+    targets.push_back(sim::ShootableTarget{101, map::MonsterType::None, 200.0f, 108.0f, 200.0f,
+                                           108.0f, 32.0f, 32.0f, 0, 0, 100, 100, 0, false});
 
     sim::WeaponSystem weapons;
     sim::PlayerInput fire_input{};
@@ -1329,16 +1332,639 @@ TEST_CASE("teleport preserves weapons and ammo", "[sim][triggers]") {
     sim::TriggerSystem triggers;
     triggers.reset(doc);
 
+    sim::MapCollision collision;
+    collision.build_from_panels(triggers.panels());
+
     sim::PlayerState player;
     player.reset_to_spawn(4.0f, 4.0f);
     own_weapon(player.combat(), sim::WeaponId::Chaingun);
     give_ammo(player.combat(), sim::AmmoType::Bullets, 100);
     player.combat().select_weapon(sim::WeaponId::Chaingun);
 
-    triggers.update(player, false);
+    triggers.update(player, false, nullptr, nullptr, &collision);
 
     CHECK(player.combat().owned[static_cast<std::size_t>(sim::WeaponId::Chaingun)]);
     CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Bullets)] == 100);
     CHECK(player.combat().current_weapon == sim::WeaponId::Chaingun);
     CHECK(std::abs(player.x - (200.0f - sim::PlayerState::width * 0.5f)) < 0.01f);
+}
+
+TEST_CASE("blocked teleport keeps player position", "[sim][triggers]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {196, 48};
+    wall.size = {32, 64};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trigger = doc.triggers.back();
+    trigger.type = map::TriggerType::Teleport;
+    trigger.position = {0, 0};
+    trigger.size = {32, 32};
+    trigger.activate = map::ActivateType::PlayerCollide;
+    trigger.teleport_target = {200, 100};
+    trigger.d2d = true;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::MapCollision collision;
+    collision.build_from_panels(triggers.panels());
+
+    sim::PlayerState player;
+    player.snap_to(4.0f, 4.0f);
+    const float start_x = player.x;
+
+    d2df::EventBus events;
+    triggers.update(player, false, &events, nullptr, &collision);
+
+    CHECK(player.x == start_x);
+}
+
+TEST_CASE("jetpack activates in air when jump pressed", "[sim][player]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {256, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.refill_jetpack();
+
+    sim::PlayerInput none{};
+    for (int i = 0; i < 4; ++i) {
+        player.fixed_update(collision, none);
+    }
+
+    sim::PlayerInput jump{};
+    jump.jump = true;
+    player.fixed_update(collision, jump);
+
+    CHECK(player.jetpack_active());
+    CHECK(player.jet_fuel() < sim::PlayerState::kJetFuelMax);
+}
+
+TEST_CASE("monster chases and damages nearby player", "[sim][monsters]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {512, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(200.0f, 140.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget monster;
+    monster.id = 200;
+    monster.monster_type = map::MonsterType::Zomby;
+    monster.x = 120.0f;
+    monster.y = 140.0f;
+    monster.prev_x = monster.x;
+    monster.prev_y = monster.y;
+    monster.width = 34.0f;
+    monster.height = 52.0f;
+    monster.max_health = 15;
+    monster.health = 15;
+    targets.push_back(monster);
+
+    sim::MonsterSystem monsters;
+    const int health_before = player.health();
+    for (int i = 0; i < 120; ++i) {
+        monsters.tick(collision, player, targets, nullptr);
+    }
+
+    CHECK(targets[0].x > 120.0f);
+    CHECK(player.health() < health_before);
+}
+
+TEST_CASE("monster does not chase player hidden behind wall", "[sim][monsters]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {512, 16};
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {160, 120};
+    wall.size = {16, 80};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(220.0f, 140.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget monster;
+    monster.id = 200;
+    monster.monster_type = map::MonsterType::Zomby;
+    monster.x = 100.0f;
+    monster.y = 140.0f;
+    monster.prev_x = monster.x;
+    monster.prev_y = monster.y;
+    monster.width = 34.0f;
+    monster.height = 52.0f;
+    monster.max_health = 15;
+    monster.health = 15;
+    monster.facing_left = false;
+    targets.push_back(monster);
+
+    sim::MonsterSystem monsters;
+    for (int i = 0; i < 120; ++i) {
+        monsters.tick(collision, player, targets, nullptr);
+    }
+
+    CHECK(targets[0].x == 100.0f);
+}
+
+TEST_CASE("damaged monster chases player even through wall", "[sim][monsters]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {512, 16};
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {160, 120};
+    wall.size = {16, 80};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(220.0f, 140.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget monster;
+    monster.id = 200;
+    monster.monster_type = map::MonsterType::Zomby;
+    monster.x = 100.0f;
+    monster.y = 140.0f;
+    monster.prev_x = monster.x;
+    monster.prev_y = monster.y;
+    monster.width = 34.0f;
+    monster.height = 52.0f;
+    monster.max_health = 15;
+    monster.health = 15;
+    monster.facing_left = false;
+    targets.push_back(monster);
+    targets[0].apply_damage(5, d2df::kPlayerEntityId);
+
+    sim::MonsterSystem monsters;
+    for (int i = 0; i < 120; ++i) {
+        monsters.tick(collision, player, targets, nullptr);
+    }
+
+    CHECK(targets[0].x > 100.0f);
+}
+
+TEST_CASE("flying soul keeps altitude without ground physics", "[sim][monsters]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 400};
+    floor.size = {512, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(300.0f, 500.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget soul;
+    soul.id = 200;
+    soul.monster_type = map::MonsterType::Soul;
+    soul.x = 200.0f;
+    soul.y = 180.0f;
+    soul.prev_x = soul.x;
+    soul.prev_y = soul.y;
+    soul.width = 32.0f;
+    soul.height = 36.0f;
+    soul.max_health = 60;
+    soul.health = 60;
+    targets.push_back(soul);
+
+    sim::MonsterSystem monsters;
+    for (int i = 0; i < 120; ++i) {
+        monsters.tick(collision, player, targets, nullptr);
+    }
+
+    CHECK(targets[0].y < 250.0f);
+}
+
+TEST_CASE("falling item rises inside lift-up zone", "[sim][items]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {256, 16};
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& lift = doc.panels.back();
+    lift.type = map::PANEL_LIFTUP;
+    lift.position = {80, 120};
+    lift.size = {64, 64};
+
+    map::MapItem key;
+    key.position = {100, 140};
+    key.type = map::ItemType::KeyRed;
+    key.fall = true;
+    doc.items.push_back(key);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+
+    const float start_y = items.items()[0].y;
+    for (int i = 0; i < 120; ++i) {
+        items.tick(player, &collision, nullptr);
+    }
+    CHECK(items.items()[0].y < start_y);
+}
+
+TEST_CASE("ground monster rises inside lift-up zone", "[sim][monsters]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {256, 16};
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& lift = doc.panels.back();
+    lift.type = map::PANEL_LIFTUP;
+    lift.position = {80, 120};
+    lift.size = {64, 64};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.x = 100.0f;
+    zomby.y = 140.0f;
+    zomby.prev_x = zomby.x;
+    zomby.prev_y = zomby.y;
+    zomby.width = 34.0f;
+    zomby.height = 52.0f;
+    zomby.max_health = 20;
+    zomby.health = 20;
+    targets.push_back(zomby);
+
+    sim::MonsterSystem monsters;
+    const float start_y = targets[0].y;
+    for (int i = 0; i < 120; ++i) {
+        monsters.tick(collision, player, targets, nullptr);
+    }
+    CHECK(targets[0].y < start_y);
+}
+
+TEST_CASE("monster takes periodic acid damage", "[sim][monsters]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& acid = doc.panels.back();
+    acid.type = map::PANEL_ACID1;
+    acid.position = {0, 0};
+    acid.size = {128, 128};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(500.0f, 500.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.x = 32.0f;
+    zomby.y = 32.0f;
+    zomby.prev_x = zomby.x;
+    zomby.prev_y = zomby.y;
+    zomby.width = 34.0f;
+    zomby.height = 52.0f;
+    zomby.max_health = 100;
+    zomby.health = 100;
+    targets.push_back(zomby);
+
+    sim::MonsterSystem monsters;
+    sim::PlayerInput none{};
+    for (int i = 0; i < 180; ++i) {
+        player.fixed_update(collision, none);
+        monsters.tick(collision, player, targets, nullptr);
+    }
+    CHECK(targets[0].health < 100);
+}
+
+TEST_CASE("doom2d map06 lift-down trigger flips shaft direction", "[sim][integration]") {
+    const auto map_path =
+        std::filesystem::path(D2DF_SOURCE_DIR) / "assets/content/maps/doom2d/map06.json";
+    if (!std::filesystem::exists(map_path)) {
+        SKIP("map06.json not available");
+    }
+
+    const auto doc = map::load_map_json_v1(map_path);
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    CHECK((triggers.panels()[450].type & map::PANEL_LIFTUP) != 0);
+
+    sim::PlayerState player;
+    player.snap_to(1300.0f, 1310.0f);
+    triggers.update(player, true);
+
+    CHECK((triggers.panels()[450].type & map::PANEL_LIFTDOWN) != 0);
+}
+
+TEST_CASE("dead soul is removed from target list", "[sim][monsters]") {
+    ecs::GameWorld world;
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 400};
+    floor.size = {512, 16};
+
+    doc.monsters.push_back(map::MapMonster{{200, 180}, map::MonsterType::Soul});
+    world.reset_player(doc);
+    CHECK(world.targets().size() == 1);
+
+    world.targets().front().apply_damage(100, d2df::kPlayerEntityId);
+    CHECK_FALSE(world.targets().front().alive());
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+    sim::PlayerInput none{};
+    for (int i = 0; i < 4; ++i) {
+        world.fixed_update(collision, none, nullptr, 512, 512, nullptr);
+    }
+    CHECK(world.targets().empty());
+}
+
+TEST_CASE("imp shoots player at range with line of sight", "[sim][monsters]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 300};
+    floor.size = {512, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(320.0f, 220.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget imp;
+    imp.id = 200;
+    imp.monster_type = map::MonsterType::Imp;
+    imp.x = 80.0f;
+    imp.y = 220.0f;
+    imp.prev_x = imp.x;
+    imp.prev_y = imp.y;
+    imp.width = 34.0f;
+    imp.height = 50.0f;
+    imp.max_health = 25;
+    imp.health = 25;
+    imp.facing_left = false;
+    targets.push_back(imp);
+
+    sim::MonsterSystem monsters;
+    sim::ProjectileSystem projectiles;
+    sim::TriggerSystem triggers;
+    const int health_before = player.health();
+    for (int i = 0; i < 180; ++i) {
+        monsters.tick(collision, player, targets, nullptr, &projectiles);
+        projectiles.tick(collision, &triggers, player, targets, nullptr, 512, 512);
+    }
+
+    CHECK(player.health() < health_before);
+}
+
+TEST_CASE("barrel explosion damages nearby player", "[sim][monsters]") {
+    ecs::GameWorld world;
+    map::MapDocument doc;
+
+    std::vector<sim::ShootableTarget>& targets = world.targets();
+    sim::ShootableTarget barrel;
+    barrel.id = 200;
+    barrel.monster_type = map::MonsterType::Barrel;
+    barrel.x = 200.0f;
+    barrel.y = 200.0f;
+    barrel.prev_x = barrel.x;
+    barrel.prev_y = barrel.y;
+    barrel.width = 24.0f;
+    barrel.height = 36.0f;
+    barrel.max_health = 20;
+    barrel.health = 20;
+    targets.push_back(barrel);
+
+    world.player().snap_to(200.0f, 200.0f);
+
+    sim::MapCollision collision;
+    sim::PlayerInput none{};
+    targets.front().apply_damage(20, d2df::kPlayerEntityId);
+
+    const int health_before = world.player().health();
+    world.fixed_update(collision, none, nullptr, 512, 512, nullptr);
+    CHECK(world.player().health() < health_before);
+}
+
+TEST_CASE("pain elemental spawns lost soul at range", "[sim][monsters]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 300};
+    floor.size = {512, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(320.0f, 220.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget pain;
+    pain.id = 200;
+    pain.monster_type = map::MonsterType::Pain;
+    pain.x = 80.0f;
+    pain.y = 200.0f;
+    pain.prev_x = pain.x;
+    pain.prev_y = pain.y;
+    pain.width = 60.0f;
+    pain.height = 56.0f;
+    pain.max_health = 100;
+    pain.health = 100;
+    pain.facing_left = false;
+    targets.push_back(pain);
+
+    sim::MonsterSystem monsters;
+    d2df::EntityId next_id = 300;
+    for (int i = 0; i < 120; ++i) {
+        monsters.tick(collision, player, targets, nullptr, nullptr, &next_id);
+    }
+
+    CHECK(targets.size() >= 2);
+    CHECK(std::any_of(targets.begin(), targets.end(), [](const sim::ShootableTarget& target) {
+        return target.monster_type == map::MonsterType::Soul && target.alive();
+    }));
+}
+
+TEST_CASE("pain elemental death spawns three lost souls", "[sim][monsters]") {
+    ecs::GameWorld world;
+    map::MapDocument doc;
+
+    std::vector<sim::ShootableTarget>& targets = world.targets();
+    sim::ShootableTarget pain;
+    pain.id = 200;
+    pain.monster_type = map::MonsterType::Pain;
+    pain.x = 200.0f;
+    pain.y = 200.0f;
+    pain.prev_x = pain.x;
+    pain.prev_y = pain.y;
+    pain.width = 60.0f;
+    pain.height = 56.0f;
+    pain.max_health = 100;
+    pain.health = 100;
+    targets.push_back(pain);
+
+    world.player().snap_to(500.0f, 500.0f);
+
+    sim::MapCollision collision;
+    sim::PlayerInput none{};
+    targets.front().apply_damage(100, d2df::kPlayerEntityId);
+
+    world.fixed_update(collision, none, nullptr, 512, 512, nullptr);
+
+    const int soul_count = static_cast<int>(std::count_if(
+        targets.begin(), targets.end(), [](const sim::ShootableTarget& target) {
+            return target.monster_type == map::MonsterType::Soul && target.alive();
+        }));
+    CHECK(soul_count == 3);
+    CHECK(targets.size() == 3);
+}
+
+TEST_CASE("killed zomby becomes corpse instead of immediate removal", "[sim][monsters]") {
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.max_health = 15;
+    zomby.health = 15;
+    targets.push_back(zomby);
+
+    targets.front().apply_damage(15, d2df::kPlayerEntityId);
+    CHECK_FALSE(targets.front().alive());
+    CHECK(targets.front().is_corpse());
+    CHECK(targets.size() == 1);
+}
+
+TEST_CASE("reviving monster returns to life", "[sim][monsters]") {
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.max_health = 15;
+    zomby.health = 15;
+    targets.push_back(zomby);
+    targets.front().apply_damage(15, d2df::kPlayerEntityId);
+    targets.front().life_state = sim::MonsterLifeState::Reviving;
+    targets.front().revive_ticks = 2;
+
+    sim::MapCollision collision;
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+    sim::MonsterSystem monsters;
+
+    for (int i = 0; i < 3; ++i) {
+        monsters.tick(collision, player, targets, nullptr);
+    }
+
+    CHECK(targets.front().alive());
+    CHECK(targets.front().health == 15);
+}
+
+TEST_CASE("arch vile revives overlapping corpse", "[sim][monsters]") {
+    map::MapDocument doc;
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(500.0f, 500.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.x = 200.0f;
+    zomby.y = 200.0f;
+    zomby.width = 34.0f;
+    zomby.height = 52.0f;
+    zomby.max_health = 15;
+    zomby.health = 15;
+    targets.push_back(zomby);
+    targets.front().apply_damage(15, d2df::kPlayerEntityId);
+
+    sim::ShootableTarget vile;
+    vile.id = 192;
+    vile.monster_type = map::MonsterType::Vile;
+    vile.x = 200.0f;
+    vile.y = 200.0f;
+    vile.width = 68.0f;
+    vile.height = 72.0f;
+    vile.max_health = 150;
+    vile.health = 150;
+    targets.push_back(vile);
+
+    sim::MonsterSystem monsters;
+    sim::PlayerInput none{};
+    bool revived = false;
+    for (int i = 0; i < 240; ++i) {
+        player.fixed_update(collision, none);
+        monsters.tick(collision, player, targets, nullptr);
+        if (targets.front().alive()) {
+            revived = true;
+            break;
+        }
+    }
+    CHECK(revived);
 }

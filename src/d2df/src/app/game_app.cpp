@@ -39,7 +39,7 @@ GameApp::~GameApp() {
 }
 
 bool GameApp::init_sdl() {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) != 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO) != 0) {
         spdlog::error("SDL_Init failed: {}", SDL_GetError());
         return false;
     }

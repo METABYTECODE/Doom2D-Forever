@@ -50,6 +50,8 @@ void PlayerState::reset_to_spawn(float spawn_x, float spawn_y) {
     berserk_until_ = 0;
     jet_fuel_ = 0;
     air_ = kAirMax;
+    jetpack_active_ = false;
+    can_jetpack_ = false;
 }
 
 std::uint8_t PlayerState::key_mask() const {
@@ -217,6 +219,19 @@ void PlayerState::apply_run(bool left, bool right) {
 }
 
 void PlayerState::try_jump(const MapCollision& collision) {
+    if (jetpack_active_) {
+        if (jet_fuel_ > 0) {
+            if (vel_y > -kVelFly) {
+                vel_y -= 3;
+            }
+            --jet_fuel_;
+        }
+        if (jet_fuel_ <= 0) {
+            jetpack_active_ = false;
+        }
+        return;
+    }
+
     const bool grounded =
         on_ground_ ||
         collision.on_ground(x, y, width, height) ||
@@ -225,11 +240,22 @@ void PlayerState::try_jump(const MapCollision& collision) {
     if (grounded && accel_y == 0) {
         vel_y = -kVelJump;
         on_ground_ = false;
+        can_jetpack_ = false;
         return;
     }
 
     if (in_water_) {
         vel_y = -kVelSwim;
+        return;
+    }
+
+    if (jet_fuel_ > 0 && can_jetpack_ && !in_water_) {
+        jetpack_active_ = true;
+        can_jetpack_ = false;
+        if (vel_y > -kVelFly) {
+            vel_y -= 3;
+        }
+        --jet_fuel_;
     }
 }
 
@@ -336,6 +362,13 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
     }
 
     update_facing(input.left, input.right);
+
+    if (!input.jump) {
+        if (jetpack_active_) {
+            jetpack_active_ = false;
+        }
+        can_jetpack_ = true;
+    }
 }
 
 float PlayerState::render_x(float alpha) const {

@@ -55,6 +55,7 @@ struct PlayerState {
     static constexpr int kBerserkTicks = 30 * kTicksPerSecond;
     static constexpr int kAirMax = 1091;
     static constexpr int kJetFuelMax = 540;
+    static constexpr int kVelFly = 6;
 
     PlayerState();
 
@@ -97,6 +98,7 @@ struct PlayerState {
     [[nodiscard]] bool has_berserk() const;
     [[nodiscard]] int jet_fuel() const { return jet_fuel_; }
     [[nodiscard]] int air() const { return air_; }
+    [[nodiscard]] bool jetpack_active() const { return jetpack_active_; }
 
     void give_suit();
     void give_invul();
@@ -128,6 +130,8 @@ private:
     int berserk_until_ = 0;
     int jet_fuel_ = 0;
     int air_ = kAirMax;
+    bool jetpack_active_ = false;
+    bool can_jetpack_ = false;
     bool on_ground_ = false;
     bool in_water_ = false;
     bool in_acid_ = false;

@@ -11,6 +11,7 @@
 #include <d2df/map/map_catalog.hpp>
 #include <d2df/map/item_types.hpp>
 #include <d2df/map/map_json_loader.hpp>
+#include <d2df/map/monster_types.hpp>
 #include <d2df/sim/item_system.hpp>
 
 namespace d2df {
@@ -39,6 +40,44 @@ std::size_t find_map_index(const std::vector<std::filesystem::path>& map_list,
 
 } // namespace
 
+void set_monster_draw_color(map::MonsterType type, SDL_Renderer* renderer) {
+    switch (type) {
+    case map::MonsterType::Zomby:
+        SDL_SetRenderDrawColor(renderer, 120, 180, 80, 220);
+        break;
+    case map::MonsterType::Imp:
+        SDL_SetRenderDrawColor(renderer, 200, 120, 60, 220);
+        break;
+    case map::MonsterType::Demon:
+        SDL_SetRenderDrawColor(renderer, 220, 60, 60, 220);
+        break;
+    case map::MonsterType::Serg:
+        SDL_SetRenderDrawColor(renderer, 160, 160, 80, 220);
+        break;
+    case map::MonsterType::Soul:
+        SDL_SetRenderDrawColor(renderer, 255, 140, 40, 220);
+        break;
+    case map::MonsterType::Pain:
+        SDL_SetRenderDrawColor(renderer, 180, 60, 200, 220);
+        break;
+    case map::MonsterType::Caco:
+        SDL_SetRenderDrawColor(renderer, 220, 60, 120, 220);
+        break;
+    case map::MonsterType::Cgun:
+        SDL_SetRenderDrawColor(renderer, 140, 140, 160, 220);
+        break;
+    case map::MonsterType::Barrel:
+        SDL_SetRenderDrawColor(renderer, 160, 100, 40, 220);
+        break;
+    case map::MonsterType::Fish:
+        SDL_SetRenderDrawColor(renderer, 80, 160, 220, 220);
+        break;
+    default:
+        SDL_SetRenderDrawColor(renderer, 180, 60, 200, 220);
+        break;
+    }
+}
+
 MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                      std::filesystem::path map_path, EventBus* events)
     : renderer_(renderer)
@@ -46,6 +85,20 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
     , events_(events) {
     assets_.load(content_root_);
     text_.init(content_root_);
+    sound_.set_content_root(content_root_);
+    sound_.bind_assets(assets_);
+    if (sound_.init()) {
+        if (events_ != nullptr) {
+            events_->subscribe<events::ItemPickedUp>(
+                [this](const events::ItemPickedUp&) { sound_.play("sfx.world.getitem"); });
+            events_->subscribe<events::ItemRespawned>(
+                [this](const events::ItemRespawned&) { sound_.play("sfx.world.respawnitem"); });
+            events_->subscribe<events::PlayerTeleported>(
+                [this](const events::PlayerTeleported& event) {
+                    sound_.play(event.blocked ? "sfx.world.noteleport" : "sfx.world.teleport");
+                });
+        }
+    }
     map_list_ = map::list_map_json_files(content_root_);
     spdlog::info("Map catalog: {} JSON maps", map_list_.size());
     load_map(std::move(map_path));
@@ -67,6 +120,10 @@ void MapViewer::load_map(const std::filesystem::path& map_path) {
     spdlog::info("Map [{}/{}]: {} ({}x{}, {} panels, {} areas)", map_index_ + 1,
                  map_list_.size(), map_.name, map_.size.width, map_.size.height, map_.panels.size(),
                  map_.areas.size());
+
+    if (sound_.enabled() && !map_.music.empty()) {
+        sound_.play_music(map_.music.c_str());
+    }
 }
 
 void MapViewer::cycle_map(int direction) {
@@ -291,7 +348,8 @@ void MapViewer::fixed_update() {
     auto& player = world_.player();
     collision_.build_from_panels(triggers_.panels());
     world_.fixed_update(collision_, input, events_, map_.size.width, map_.size.height, &triggers_);
-    triggers_.update(player, key_use_edge_, events_, &world_.targets());
+    triggers_.update(player, key_use_edge_, events_, &world_.targets(), &collision_);
+    collision_.build_from_panels(triggers_.panels());
     key_use_edge_ = false;
 
     if (!player.alive()) {
@@ -553,19 +611,80 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
     }
 
     for (const auto& target : world_.targets()) {
-        if (!target.alive()) {
+        const bool draw_corpse = target.is_monster() &&
+                                 (target.is_corpse() || target.is_reviving());
+        if (!target.alive() && !draw_corpse) {
             continue;
+        }
+
+        const float alpha = fixed_timestep_.render_alpha();
+        const float rx = target.render_x(alpha);
+        const float ry = target.render_y(alpha);
+
+        map::MonsterSprite sprite{};
+        if (target.is_monster()) {
+            if (target.is_corpse() || target.is_reviving()) {
+                sprite = map::monster_corpse_sprite(target.monster_type, target.facing_left);
+            } else {
+                sprite = map::monster_sprite(target.monster_type, target.facing_left);
+            }
+        }
+
+        const char* texture_key = sprite.texture_id;
+        if (target.facing_left && sprite.texture_id_left != nullptr) {
+            texture_key = sprite.texture_id_left;
+        }
+        SDL_Texture* texture =
+            texture_key != nullptr ? textures_->get(texture_key) : nullptr;
+
+        if (texture != nullptr) {
+            int tex_w = 0;
+            int tex_h = 0;
+            SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+            if (tex_w > 0 && tex_h > 0) {
+                const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
+                const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
+                int frame_index = 0;
+                if (sprite.frame_count > 1 && sprite.anim_period > 0) {
+                    frame_index = (target.anim_tick / sprite.anim_period) % sprite.frame_count;
+                } else if (draw_corpse && sprite.frame_count > 1) {
+                    frame_index = sprite.frame_count - 1;
+                }
+
+                int sprite_dst_x = 0;
+                int sprite_dst_y = 0;
+                int sprite_dst_w = 0;
+                int sprite_dst_h = 0;
+                camera_.world_rect_to_screen(rx, ry, static_cast<float>(frame_w),
+                                             static_cast<float>(frame_h), viewport_w, viewport_h,
+                                             sprite_dst_x, sprite_dst_y, sprite_dst_w, sprite_dst_h);
+
+                if (sprite_dst_w > 0 && sprite_dst_h > 0) {
+                    SDL_SetTextureAlphaMod(texture, 255);
+                    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+                    const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
+                    const SDL_Rect sprite_dst{sprite_dst_x, sprite_dst_y, sprite_dst_w,
+                                              sprite_dst_h};
+                    if (target.facing_left && sprite.texture_id_left == nullptr) {
+                        SDL_RenderCopyEx(renderer_, texture, &src, &sprite_dst, 0.0, nullptr,
+                                         SDL_FLIP_HORIZONTAL);
+                    } else {
+                        SDL_RenderCopy(renderer_, texture, &src, &sprite_dst);
+                    }
+                    continue;
+                }
+            }
         }
 
         int dst_x = 0;
         int dst_y = 0;
         int dst_w = 0;
         int dst_h = 0;
-        camera_.world_rect_to_screen(target.x, target.y, target.width, target.height, viewport_w,
-                                     viewport_h, dst_x, dst_y, dst_w, dst_h);
+        camera_.world_rect_to_screen(rx, ry, target.width, target.height, viewport_w, viewport_h,
+                                     dst_x, dst_y, dst_w, dst_h);
 
         if (target.is_monster()) {
-            SDL_SetRenderDrawColor(renderer_, 180, 60, 200, 220);
+            set_monster_draw_color(target.monster_type, renderer_);
         } else {
             SDL_SetRenderDrawColor(renderer_, 200, 48, 48, 220);
         }
@@ -602,12 +721,26 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
         keys += "B";
     }
   const std::string key_line = keys.empty() ? "" : "  Keys " + keys;
+    std::string powerups;
+    if (player.has_invul()) {
+        powerups += " INV";
+    }
+    if (player.has_invis()) {
+        powerups += " INVIS";
+    }
+    if (player.has_suit()) {
+        powerups += " SUIT";
+    }
+    if (player.jetpack_active() || player.jet_fuel() > 0) {
+        powerups += " JET " + std::to_string(player.jet_fuel());
+    }
     const std::string hud = map_.name + "  (" + std::to_string(map_index_ + 1) + "/" +
                             std::to_string(map_list_.size()) + ")  HP " +
                             std::to_string(player.health()) + "/" +
                             std::to_string(sim::PlayerState::kMaxHealth) + "  AP " +
                             std::to_string(player.armor()) + "/" +
-                            std::to_string(sim::PlayerState::kArmorLimit) + key_line + "  |  " +
+                            std::to_string(sim::PlayerState::kArmorLimit) + key_line + powerups +
+                            "  |  " +
                             weapon + " " + std::to_string(ammo) + charge +
                             "  |  1-9 weapons  0/B=BFG  -/G=SuperCG  Q prev  wheel zoom  " +
                             state;

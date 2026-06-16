@@ -35,7 +35,24 @@ struct MonsterDimensions {
     int health = 100;
 };
 
+struct MonsterSprite {
+    const char* texture_id = nullptr;
+    /// When set, used instead of horizontal flip for facing_left.
+    const char* texture_id_left = nullptr;
+    int frame_width = 0;
+    int frame_height = 0;
+    int frame_count = 1;
+    int anim_period = 0;
+};
+
 [[nodiscard]] MonsterType monster_type_from_name(std::string_view name);
 [[nodiscard]] MonsterDimensions monster_stats(MonsterType type);
+[[nodiscard]] MonsterSprite monster_sprite(MonsterType type, bool facing_left);
+[[nodiscard]] MonsterSprite monster_corpse_sprite(MonsterType type, bool facing_left);
+[[nodiscard]] bool monster_is_flying(MonsterType type);
+[[nodiscard]] bool monster_vanishes_on_death(MonsterType type);
+[[nodiscard]] bool monster_can_shoot(MonsterType type);
+[[nodiscard]] bool monster_can_be_revived(MonsterType type);
+[[nodiscard]] int monster_shoot_cooldown_ticks(MonsterType type);
 
 } // namespace d2df::map
