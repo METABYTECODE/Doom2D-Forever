@@ -6,6 +6,7 @@
 
 #include <d2df/map/area_types.hpp>
 #include <d2df/map/item_types.hpp>
+#include <d2df/map/monster_types.hpp>
 #include <d2df/map/trigger_types.hpp>
 
 namespace d2df::map {
@@ -54,6 +55,12 @@ struct MapTrigger {
     bool ext_random = false;
     MapPoint teleport_target;
     bool d2d = false;
+    std::uint8_t keys = 0;
+};
+
+struct MapMonster {
+    MapPoint position;
+    MonsterType type = MonsterType::None;
 };
 
 struct MapItem {
@@ -77,6 +84,7 @@ struct MapDocument {
     std::vector<MapArea> areas;
     std::vector<MapTrigger> triggers;
     std::vector<MapItem> items;
+    std::vector<MapMonster> monsters;
 };
 
 } // namespace d2df::map

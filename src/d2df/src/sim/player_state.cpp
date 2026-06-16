@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <d2df/map/panel_types.hpp>
+#include <d2df/map/key_types.hpp>
 #include <d2df/sim/map_collision.hpp>
 
 namespace d2df::sim {
@@ -15,30 +16,112 @@ int abs_int(int value) {
 
 } // namespace
 
-void PlayerState::snap_to(float spawn_x, float spawn_y) {
-    x = spawn_x;
-    y = spawn_y;
-    prev_x = spawn_x;
-    prev_y = spawn_y;
+PlayerState::PlayerState() {
+    combat_.reset_single_player_loadout();
+}
+
+void PlayerState::snap_to(float pos_x, float pos_y) {
+    x = pos_x;
+    y = pos_y;
+    prev_x = pos_x;
+    prev_y = pos_y;
     vel_x = 0;
     vel_y = 0;
     accel_x = 0;
     accel_y = 0;
-    tick_ = 0;
     on_ground_ = false;
     in_water_ = false;
     in_acid_ = false;
     on_lift_ = false;
+}
+
+void PlayerState::reset_to_spawn(float spawn_x, float spawn_y) {
+    snap_to(spawn_x, spawn_y);
+    tick_ = 0;
     health_ = kMaxHealth;
     combat_.reset_single_player_loadout();
     armor_ = 0;
     key_red_ = false;
     key_green_ = false;
     key_blue_ = false;
+    powerup_suit_until_ = 0;
+    powerup_invul_until_ = 0;
+    powerup_invis_until_ = 0;
+    berserk_until_ = 0;
+    jet_fuel_ = 0;
+    air_ = kAirMax;
+}
+
+std::uint8_t PlayerState::key_mask() const {
+    std::uint8_t mask = map::KeyNone;
+    if (key_red_) {
+        mask |= map::KeyRed;
+    }
+    if (key_green_) {
+        mask |= map::KeyGreen;
+    }
+    if (key_blue_) {
+        mask |= map::KeyBlue;
+    }
+    return mask;
+}
+
+bool PlayerState::has_suit() const {
+    return tick_ < powerup_suit_until_;
+}
+
+bool PlayerState::has_invul() const {
+    return tick_ < powerup_invul_until_;
+}
+
+bool PlayerState::has_invis() const {
+    return tick_ < powerup_invis_until_;
+}
+
+bool PlayerState::has_berserk() const {
+    return tick_ < berserk_until_;
+}
+
+void PlayerState::give_suit() {
+    powerup_suit_until_ = std::max(powerup_suit_until_, tick_ + kPowerupSuitTicks);
+}
+
+void PlayerState::give_invul() {
+    powerup_invul_until_ = std::max(powerup_invul_until_, tick_ + kPowerupInvulTicks);
+}
+
+void PlayerState::give_invis() {
+    powerup_invis_until_ = std::max(powerup_invis_until_, tick_ + kPowerupInvisTicks);
+}
+
+void PlayerState::give_berserk() {
+    berserk_until_ = std::max(berserk_until_, tick_ + kBerserkTicks);
+}
+
+void PlayerState::refill_oxygen() {
+    air_ = kAirMax;
+}
+
+void PlayerState::refill_jetpack() {
+    jet_fuel_ = kJetFuelMax;
+}
+
+void PlayerState::heal_bottle() {
+    if (health_ < kHealthLimit) {
+        health_ = std::min(health_ + 4, kHealthLimit);
+    }
+}
+
+bool PlayerState::add_armor_small() {
+    if (armor_ >= kArmorLimit) {
+        return false;
+    }
+    armor_ = std::min(armor_ + 5, kArmorLimit);
+    return true;
 }
 
 bool PlayerState::apply_damage(int amount) {
-    if (amount <= 0 || !alive()) {
+    if (amount <= 0 || !alive() || has_invul()) {
         return false;
     }
 

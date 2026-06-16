@@ -47,6 +47,13 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
     case map::ItemType::MedkitLarge:
         return player.add_health(25, kHealthSoftCap);
 
+    case map::ItemType::MedkitBlack:
+        if (player.health() < kHealthSoftCap) {
+            player.set_health(kHealthSoftCap);
+        }
+        player.give_berserk();
+        return true;
+
     case map::ItemType::SphereBlue:
         return player.add_health(100, kHealthLimit);
 
@@ -74,6 +81,42 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
             return false;
         }
         player.set_armor(PlayerState::kArmorLimit);
+        return true;
+
+    case map::ItemType::Suit:
+        player.give_suit();
+        return true;
+
+    case map::ItemType::Oxygen:
+        if (player.air() >= PlayerState::kAirMax) {
+            return false;
+        }
+        player.refill_oxygen();
+        return true;
+
+    case map::ItemType::Invul:
+        player.give_invul();
+        return true;
+
+    case map::ItemType::Invis:
+        player.give_invis();
+        return true;
+
+    case map::ItemType::Bottle:
+        if (player.health() >= kHealthLimit) {
+            return false;
+        }
+        player.heal_bottle();
+        return true;
+
+    case map::ItemType::Helmet:
+        return player.add_armor_small();
+
+    case map::ItemType::Jetpack:
+        if (player.jet_fuel() >= PlayerState::kJetFuelMax) {
+            return false;
+        }
+        player.refill_jetpack();
         return true;
 
     case map::ItemType::KeyRed:
@@ -222,16 +265,87 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
     }
 }
 
+bool should_remove_item(const WorldItem& item, map::ItemType type, const PlayerState& player,
+                        const GameRules& rules) {
+    switch (type) {
+    case map::ItemType::KeyRed:
+    case map::ItemType::KeyGreen:
+    case map::ItemType::KeyBlue:
+        return !rules.shared_keys();
+
+    default:
+        break;
+    }
+
+    if (rules.weapons_stay && item.respawnable && map::item_is_weapon(type)) {
+        const auto weapon_index = static_cast<std::size_t>(
+            [&]() -> WeaponId {
+                switch (type) {
+                case map::ItemType::WeaponKnuckles:
+                    return WeaponId::Knuckles;
+                case map::ItemType::WeaponPistol:
+                    return WeaponId::Pistol;
+                case map::ItemType::WeaponSaw:
+                    return WeaponId::Saw;
+                case map::ItemType::WeaponShotgun1:
+                    return WeaponId::Shotgun1;
+                case map::ItemType::WeaponShotgun2:
+                    return WeaponId::Shotgun2;
+                case map::ItemType::WeaponChaingun:
+                    return WeaponId::Chaingun;
+                case map::ItemType::WeaponRocketLauncher:
+                    return WeaponId::RocketLauncher;
+                case map::ItemType::WeaponPlasma:
+                    return WeaponId::Plasma;
+                case map::ItemType::WeaponBfg:
+                    return WeaponId::Bfg;
+                case map::ItemType::WeaponSuperChaingun:
+                    return WeaponId::SuperChaingun;
+                case map::ItemType::WeaponFlamethrower:
+                    return WeaponId::Flamethrower;
+                default:
+                    return WeaponId::Knuckles;
+                }
+            }());
+        if (player.combat().owned[weapon_index]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void tick_falling_item(WorldItem& item, const MapCollision& collision) {
+    item.vel_y += 1;
+    if (item.vel_y > PlayerState::kMaxYVel) {
+        item.vel_y = PlayerState::kMaxYVel;
+    }
+
+    float x = item.x;
+    float y = item.y;
+    const auto state = collision.move_object(x, y, item.width, item.height, item.vel_x, item.vel_y,
+                                             true);
+    item.x = x;
+    item.y = y;
+
+    if ((state & MOVE_HITLAND) != 0 || (state & MOVE_HITCEIL) != 0) {
+        item.vel_y = 0;
+    }
+    if ((state & MOVE_HITWALL) != 0) {
+        item.vel_x = 0;
+    }
+}
+
 } // namespace
 
-void ItemSystem::reset(const map::MapDocument& map, bool single_player) {
-    single_player_ = single_player;
+void ItemSystem::reset(const map::MapDocument& map, const GameRules& rules) {
+    rules_ = rules;
     items_.clear();
     for (const auto& map_item : map.items) {
         if (map_item.type == map::ItemType::None) {
             continue;
         }
-        if (single_player && map_item.only_dm) {
+        if (!rules.is_multiplayer() && map_item.only_dm) {
             continue;
         }
 
@@ -239,20 +353,46 @@ void ItemSystem::reset(const map::MapDocument& map, bool single_player) {
         item.type = map_item.type;
         item.x = static_cast<float>(map_item.position.x);
         item.y = static_cast<float>(map_item.position.y);
+        item.spawn_x = item.x;
+        item.spawn_y = item.y;
+        item.fall = map_item.fall;
         const auto dims = map::item_dimensions(map_item.type);
         item.width = dims.width;
         item.height = dims.height;
-        item.respawnable = single_player && map::item_respawns_in_single_player(map_item.type);
+        if (rules.items_respawn()) {
+            item.respawnable = map::item_respawns_in_multiplayer(map_item.type);
+        } else {
+            item.respawnable = map::item_respawns_in_single_player(map_item.type);
+        }
         items_.push_back(item);
     }
 }
 
-void ItemSystem::tick(PlayerState& player, EventBus* events) {
+void ItemSystem::tick(PlayerState& player, const MapCollision* collision, EventBus* events) {
     for (auto& item : items_) {
         if (!item.active && item.respawnable && item.respawn_countdown > 0) {
             --item.respawn_countdown;
             if (item.respawn_countdown == 0) {
                 item.active = true;
+                item.x = item.spawn_x;
+                item.y = item.spawn_y;
+                item.vel_x = 0;
+                item.vel_y = 0;
+                item.respawn_anim_tick = kItemRespawnAnimTotalTicks;
+                if (events != nullptr) {
+                    events->publish(events::ItemRespawned{item.x, item.y});
+                }
+            }
+        }
+
+        if (item.respawn_anim_tick > 0) {
+            --item.respawn_anim_tick;
+        }
+
+        if (item.active) {
+            ++item.anim_tick;
+            if (item.fall && collision != nullptr) {
+                tick_falling_item(item, *collision);
             }
         }
     }
@@ -275,11 +415,14 @@ void ItemSystem::tick(PlayerState& player, EventBus* events) {
             continue;
         }
 
-        if (item.respawnable && single_player_) {
-            item.active = false;
-            item.respawn_countdown = kDefaultItemRespawnTicks;
-        } else {
-            item.active = false;
+        const bool remove = should_remove_item(item, item.type, player, rules_);
+        if (remove) {
+            if (item.respawnable) {
+                item.active = false;
+                item.respawn_countdown = kDefaultItemRespawnTicks;
+            } else {
+                item.active = false;
+            }
         }
 
         if (events != nullptr) {

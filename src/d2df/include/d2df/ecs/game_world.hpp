@@ -45,6 +45,7 @@ public:
 private:
     void sync_to_ecs();
     void spawn_debug_target(const map::MapDocument& map);
+    void spawn_map_monsters(const map::MapDocument& map);
     void apply_environment_damage(const sim::MapCollision& collision, EventBus* events);
     void publish_liquid_events(bool was_water, bool was_acid, EventBus* events);
     void publish_landed_event(bool was_on_ground, EventBus* events);

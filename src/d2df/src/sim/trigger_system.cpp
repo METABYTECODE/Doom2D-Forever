@@ -361,9 +361,44 @@ bool TriggerSystem::trigger_affects(const map::MapTrigger& source,
                          static_cast<float>(target.size.height));
 }
 
-bool TriggerSystem::any_monsters_in_trigger(const map::MapTrigger& /*trigger*/) const {
-    // Map viewer has no monster simulation yet.
+bool TriggerSystem::player_has_trigger_keys(const PlayerState& player, std::uint8_t required_keys) {
+    if (required_keys == 0) {
+        return true;
+    }
+    return (player.key_mask() & required_keys) == required_keys;
+}
+
+bool TriggerSystem::any_monsters_in_trigger(
+    const map::MapTrigger& trigger, const std::vector<ShootableTarget>* monsters) const {
+    if (monsters == nullptr) {
+        return false;
+    }
+
+    const float tx = static_cast<float>(trigger.position.x);
+    const float ty = static_cast<float>(trigger.position.y);
+    const float tw = static_cast<float>(trigger.size.width);
+    const float th = static_cast<float>(trigger.size.height);
+
+    for (const auto& monster : *monsters) {
+        if (!monster.alive() || !monster.is_monster()) {
+            continue;
+        }
+        if (rects_overlap(tx, ty, tw, th, monster.x, monster.y, monster.width, monster.height)) {
+            return true;
+        }
+    }
     return false;
+}
+
+void TriggerSystem::try_activate_trigger(std::size_t trigger_index, PlayerState& player,
+                                           EventBus* events,
+                                           const std::vector<ShootableTarget>* /*monsters*/) {
+    const auto& trigger = triggers_[trigger_index];
+    if (!player_has_trigger_keys(player, trigger.keys)) {
+        return;
+    }
+
+    activate_trigger(trigger_index, player, events);
 }
 
 void TriggerSystem::queue_expander(std::size_t trigger_index) {
@@ -565,7 +600,8 @@ void TriggerSystem::apply_on_load_triggers() {
     }
 }
 
-void TriggerSystem::update(PlayerState& player, bool use_pressed, EventBus* events) {
+void TriggerSystem::update(PlayerState& player, bool use_pressed, EventBus* events,
+                           const std::vector<ShootableTarget>* monsters) {
     tick_door_timers();
 
     for (std::size_t i = 0; i < triggers_.size(); ++i) {
@@ -590,25 +626,27 @@ void TriggerSystem::update(PlayerState& player, bool use_pressed, EventBus* even
             has_flag(trigger.activate, map::ActivateType::MonsterCollide);
         const bool has_no_monster = has_flag(trigger.activate, map::ActivateType::NoMonster);
 
-        if (has_monster_collide && has_no_monster && !nomonster_boot_done_[i]) {
+        if (has_monster_collide && has_no_monster && !nomonster_boot_done_[i] &&
+            trigger.keys == 0) {
             nomonster_boot_done_[i] = true;
-            activate_trigger(i, player, events);
+            try_activate_trigger(i, player, events, monsters);
             continue;
         }
 
-        if (has_no_monster && !has_monster_collide && !any_monsters_in_trigger(trigger)) {
-            activate_trigger(i, player, events);
+        if (has_no_monster && !has_monster_collide && trigger.keys == 0 &&
+            !any_monsters_in_trigger(trigger, monsters)) {
+            try_activate_trigger(i, player, events, monsters);
             continue;
         }
 
         const bool inside = player_overlaps(trigger, player);
 
         if (has_flag(trigger.activate, map::ActivateType::PlayerCollide) && inside) {
-            activate_trigger(i, player, events);
+            try_activate_trigger(i, player, events, monsters);
         }
 
         if (has_flag(trigger.activate, map::ActivateType::PlayerPress) && use_pressed && inside) {
-            activate_trigger(i, player, events);
+            try_activate_trigger(i, player, events, monsters);
         }
     }
 
@@ -622,7 +660,8 @@ map::MapDocument TriggerSystem::map_view(const map::MapDocument& base) const {
 }
 
 void TriggerSystem::press_shot_line(float x1, float y1, float x2, float y2, PlayerState& player,
-                                    EventBus* events) {
+                                    EventBus* events,
+                                    const std::vector<ShootableTarget>* monsters) {
     for (std::size_t i = 0; i < triggers_.size(); ++i) {
         if (trigger_timeout_[i] > 0) {
             continue;
@@ -644,12 +683,13 @@ void TriggerSystem::press_shot_line(float x1, float y1, float x2, float y2, Play
             continue;
         }
 
-        activate_trigger(i, player, events);
+        try_activate_trigger(i, player, events, monsters);
     }
 }
 
 void TriggerSystem::press_shot_rect(float x, float y, float width, float height,
-                                   PlayerState& player, EventBus* events) {
+                                   PlayerState& player, EventBus* events,
+                                   const std::vector<ShootableTarget>* monsters) {
     for (std::size_t i = 0; i < triggers_.size(); ++i) {
         if (trigger_timeout_[i] > 0) {
             continue;
@@ -671,12 +711,13 @@ void TriggerSystem::press_shot_rect(float x, float y, float width, float height,
             continue;
         }
 
-        activate_trigger(i, player, events);
+        try_activate_trigger(i, player, events, monsters);
     }
 }
 
 void TriggerSystem::press_shot_circle(float cx, float cy, float radius, PlayerState& player,
-                                      EventBus* events) {
+                                      EventBus* events,
+                                      const std::vector<ShootableTarget>* monsters) {
     if (radius <= 0.0f) {
         return;
     }
@@ -732,7 +773,7 @@ void TriggerSystem::press_shot_circle(float cx, float cy, float radius, PlayerSt
             }
         }
 
-        activate_trigger(i, player, events);
+        try_activate_trigger(i, player, events, monsters);
     }
 }
 

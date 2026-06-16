@@ -94,6 +94,7 @@ void PlayerCombat::reset_single_player_loadout() {
         ammo[i] = 0;
         max_ammo[i] = kDefaultMaxAmmo[i];
     }
+    ammo[static_cast<std::size_t>(AmmoType::Bullets)] = 50;
 
     for (auto& reload : reloading) {
         reload = 0;

@@ -5,6 +5,8 @@
 
 #include <d2df/map/area_types.hpp>
 #include <d2df/map/item_types.hpp>
+#include <d2df/map/key_types.hpp>
+#include <d2df/map/monster_types.hpp>
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/trigger_types.hpp>
 
@@ -496,6 +498,20 @@ std::vector<MapTrigger> parse_triggers(std::string_view json) {
             trigger.d2d = json_extract_bool(*data, "d2d").value_or(false);
         }
 
+        const auto keys_marker = "\"keys\":";
+        const auto keys_start = object.find(keys_marker);
+        if (keys_start != std::string_view::npos) {
+            const auto keys_array_start = object.find('[', keys_start);
+            if (keys_array_start != std::string_view::npos) {
+                const auto keys_array_end = find_matching_bracket(object, keys_array_start);
+                if (keys_array_end) {
+                    const auto keys_snippet =
+                        object.substr(keys_array_start, *keys_array_end - keys_array_start + 1);
+                    trigger.keys = key_mask_from_json_array(keys_snippet);
+                }
+            }
+        }
+
         triggers.push_back(std::move(trigger));
         i = *obj_end + 1;
     }
@@ -546,6 +562,49 @@ std::vector<MapItem> parse_items(std::string_view json) {
     return items;
 }
 
+std::vector<MapMonster> parse_monsters(std::string_view json) {
+    std::vector<MapMonster> monsters;
+    const auto marker = "\"monsters\":";
+    const auto start = json.find(marker);
+    if (start == std::string_view::npos) {
+        return monsters;
+    }
+
+    const auto array_start = json.find('[', start);
+    if (array_start == std::string_view::npos) {
+        return monsters;
+    }
+
+    const auto array_end = find_matching_bracket(json, array_start);
+    if (!array_end) {
+        return monsters;
+    }
+
+    const auto array = json.substr(array_start, *array_end - array_start + 1);
+    for (std::size_t i = 0; i < array.size();) {
+        const auto obj_start = array.find('{', i);
+        if (obj_start == std::string_view::npos) {
+            break;
+        }
+
+        const auto obj_end = find_matching_brace(array, obj_start);
+        if (!obj_end) {
+            break;
+        }
+
+        const auto object = array.substr(obj_start, *obj_end - obj_start + 1);
+        MapMonster monster;
+        monster.position = parse_point(object, "position");
+        monster.type =
+            monster_type_from_name(json_extract_string(object, "type").value_or(""));
+        if (monster.type != MonsterType::None) {
+            monsters.push_back(std::move(monster));
+        }
+        i = *obj_end + 1;
+    }
+    return monsters;
+}
+
 } // namespace
 
 MapDocument load_map_json_v1(const std::filesystem::path& path) {
@@ -573,6 +632,7 @@ MapDocument load_map_json_v1(const std::filesystem::path& path) {
     document.areas = parse_areas(json);
     document.triggers = parse_triggers(json);
     document.items = parse_items(json);
+    document.monsters = parse_monsters(json);
 
     if (document.version != 1) {
         throw std::runtime_error("Unsupported map JSON version in " + path.string());

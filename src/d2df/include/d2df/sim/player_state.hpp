@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include <d2df/sim/weapon_types.hpp>
 
 namespace d2df::sim {
@@ -45,8 +47,19 @@ struct PlayerState {
     static constexpr int kArmorLimit = 200;
     static constexpr int kTrapDamage = 1000;
     static constexpr int kAcidDamagePeriod = 15;
+    static constexpr int kTicksPerSecond = 36;
 
-    void snap_to(float spawn_x, float spawn_y);
+    static constexpr int kPowerupSuitTicks = 30 * kTicksPerSecond;
+    static constexpr int kPowerupInvulTicks = 30 * kTicksPerSecond;
+    static constexpr int kPowerupInvisTicks = 35 * kTicksPerSecond;
+    static constexpr int kBerserkTicks = 30 * kTicksPerSecond;
+    static constexpr int kAirMax = 1091;
+    static constexpr int kJetFuelMax = 540;
+
+    PlayerState();
+
+    void snap_to(float x, float y);
+    void reset_to_spawn(float spawn_x, float spawn_y);
     void begin_tick();
     void fixed_update(const MapCollision& collision, PlayerInput input);
 
@@ -60,6 +73,7 @@ struct PlayerState {
     [[nodiscard]] bool has_key_red() const { return key_red_; }
     [[nodiscard]] bool has_key_green() const { return key_green_; }
     [[nodiscard]] bool has_key_blue() const { return key_blue_; }
+    [[nodiscard]] std::uint8_t key_mask() const;
     [[nodiscard]] int tick() const { return tick_; }
     [[nodiscard]] float render_x(float alpha) const;
     [[nodiscard]] float render_y(float alpha) const;
@@ -77,6 +91,22 @@ struct PlayerState {
     bool give_key_green();
     bool give_key_blue();
 
+    [[nodiscard]] bool has_suit() const;
+    [[nodiscard]] bool has_invul() const;
+    [[nodiscard]] bool has_invis() const;
+    [[nodiscard]] bool has_berserk() const;
+    [[nodiscard]] int jet_fuel() const { return jet_fuel_; }
+    [[nodiscard]] int air() const { return air_; }
+
+    void give_suit();
+    void give_invul();
+    void give_invis();
+    void give_berserk();
+    void refill_oxygen();
+    void refill_jetpack();
+    void heal_bottle();
+    bool add_armor_small();
+
     [[nodiscard]] PlayerCombat& combat() { return combat_; }
     [[nodiscard]] const PlayerCombat& combat() const { return combat_; }
 
@@ -92,6 +122,12 @@ private:
     bool key_red_ = false;
     bool key_green_ = false;
     bool key_blue_ = false;
+    int powerup_suit_until_ = 0;
+    int powerup_invul_until_ = 0;
+    int powerup_invis_until_ = 0;
+    int berserk_until_ = 0;
+    int jet_fuel_ = 0;
+    int air_ = kAirMax;
     bool on_ground_ = false;
     bool in_water_ = false;
     bool in_acid_ = false;

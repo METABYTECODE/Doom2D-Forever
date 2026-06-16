@@ -7,7 +7,8 @@
 #include <d2df/core/fixed_timestep.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/ecs/game_world.hpp>
-#include <d2df/map/area_types.hpp>
+#include <d2df/map/item_types.hpp>
+#include <d2df/map/key_types.hpp>
 #include <d2df/map/map_document.hpp>
 #include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/map_spawn.hpp>
@@ -18,6 +19,7 @@
 #define D2DF_SOURCE_DIR "."
 #endif
 #include <d2df/sim/item_system.hpp>
+#include <d2df/sim/game_rules.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/projectile_system.hpp>
@@ -981,7 +983,8 @@ TEST_CASE("super chaingun hitscan damages shootable target", "[sim][combat]") {
     give_ammo(player.combat(), sim::AmmoType::Shells, 10);
 
     std::vector<sim::ShootableTarget> targets;
-    targets.push_back(sim::ShootableTarget{101, 200.0f, 108.0f, 32.0f, 32.0f, 100});
+    targets.push_back(sim::ShootableTarget{101, map::MonsterType::None, 200.0f, 108.0f, 32.0f,
+                                           32.0f, 100, 100});
 
     sim::WeaponSystem weapons;
     sim::PlayerInput fire_input{};
@@ -1008,7 +1011,7 @@ TEST_CASE("medkit pickup restores player health", "[sim][items]") {
     player.snap_to(100.0f, 100.0f);
     player.apply_damage(30);
 
-    items.tick(player, nullptr);
+    items.tick(player, nullptr, nullptr);
 
     CHECK(player.health() == 80);
     CHECK_FALSE(items.items()[0].active);
@@ -1027,7 +1030,7 @@ TEST_CASE("ammo pickup increases combat ammo", "[sim][items]") {
     sim::PlayerState player;
     player.snap_to(100.0f, 100.0f);
 
-    items.tick(player, nullptr);
+    items.tick(player, nullptr, nullptr);
 
     CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Shells)] == 4);
     CHECK_FALSE(items.items()[0].active);
@@ -1046,7 +1049,7 @@ TEST_CASE("armor pickup raises player armor", "[sim][items]") {
     sim::PlayerState player;
     player.snap_to(100.0f, 100.0f);
 
-    items.tick(player, nullptr);
+    items.tick(player, nullptr, nullptr);
 
     CHECK(player.armor() == sim::PlayerState::kArmorSoftCap);
     CHECK_FALSE(items.items()[0].active);
@@ -1065,7 +1068,7 @@ TEST_CASE("key pickup grants inventory key", "[sim][items]") {
     sim::PlayerState player;
     player.snap_to(100.0f, 100.0f);
 
-    items.tick(player, nullptr);
+    items.tick(player, nullptr, nullptr);
 
     CHECK(player.has_key_red());
     CHECK_FALSE(items.items()[0].active);
@@ -1079,12 +1082,12 @@ TEST_CASE("ammo item respawns after pickup in single player", "[sim][items]") {
     doc.items.push_back(shells);
 
     sim::ItemSystem items;
-    items.reset(doc, true);
+    items.reset(doc);
 
     sim::PlayerState player;
     player.snap_to(100.0f, 100.0f);
 
-    items.tick(player, nullptr);
+    items.tick(player, nullptr, nullptr);
 
     CHECK_FALSE(items.items()[0].active);
     CHECK(items.items()[0].respawnable);
@@ -1093,11 +1096,11 @@ TEST_CASE("ammo item respawns after pickup in single player", "[sim][items]") {
     player.snap_to(0.0f, 0.0f);
 
     for (int i = 0; i < sim::kDefaultItemRespawnTicks - 1; ++i) {
-        items.tick(player, nullptr);
+        items.tick(player, nullptr, nullptr);
         CHECK_FALSE(items.items()[0].active);
     }
 
-    items.tick(player, nullptr);
+    items.tick(player, nullptr, nullptr);
     CHECK(items.items()[0].active);
 }
 
@@ -1114,4 +1117,228 @@ TEST_CASE("armor absorbs damage before health", "[sim][items]") {
     player.apply_damage(50);
     CHECK(player.armor() == 0);
     CHECK(player.health() == 70);
+}
+
+TEST_CASE("key-gated door requires matching key", "[sim][triggers]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& door = doc.panels.back();
+    door.type = map::PANEL_CLOSEDOOR;
+    door.position = {100, 100};
+    door.size = {16, 48};
+    door.enabled = true;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trigger = doc.triggers.back();
+    trigger.type = map::TriggerType::OpenDoor;
+    trigger.position = {80, 120};
+    trigger.size = {32, 32};
+    trigger.target_panel = 0;
+    trigger.activate = map::ActivateType::PlayerPress;
+    trigger.keys = map::KeyGreen;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(90.0f, 120.0f);
+
+    triggers.update(player, true);
+    CHECK(triggers.panels()[0].enabled);
+
+    player.give_key_green();
+    triggers.update(player, true);
+    CHECK_FALSE(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("invul powerup blocks damage", "[sim][items]") {
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+    player.give_invul();
+
+    const bool died = player.apply_damage(50);
+    CHECK_FALSE(died);
+    CHECK(player.health() == sim::PlayerState::kMaxHealth);
+}
+
+TEST_CASE("suit powerup blocks acid damage tick", "[sim][items]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& acid = doc.panels.back();
+    acid.type = map::PANEL_ACID1;
+    acid.position = {0, 100};
+    acid.size = {200, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    ecs::GameWorld world;
+    world.reset_player(doc);
+    auto& world_player = world.player();
+    world_player.snap_to(50.0f, 80.0f);
+    world_player.give_suit();
+
+    d2df::EventBus events;
+    for (int i = 0; i < sim::PlayerState::kAcidDamagePeriod * 2; ++i) {
+        world.fixed_update(collision, {}, &events, doc.size.width, doc.size.height, nullptr);
+    }
+    CHECK(world_player.health() == sim::PlayerState::kMaxHealth);
+}
+
+TEST_CASE("coop shared keys stay on map after pickup", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem key;
+    key.position = {100, 100};
+    key.type = map::ItemType::KeyGreen;
+    doc.items.push_back(key);
+
+    sim::GameRules rules;
+    rules.mode = sim::GameMode::Coop;
+
+    sim::ItemSystem items;
+    items.reset(doc, rules);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr, nullptr);
+
+    CHECK(player.has_key_green());
+    CHECK(items.items()[0].active);
+}
+
+TEST_CASE("weapons stay keeps owned weapon on map", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem shotgun;
+    shotgun.position = {100, 100};
+    shotgun.type = map::ItemType::WeaponShotgun1;
+    doc.items.push_back(shotgun);
+
+    sim::GameRules rules;
+    rules.mode = sim::GameMode::Deathmatch;
+    rules.weapons_stay = true;
+
+    sim::ItemSystem items;
+    items.reset(doc, rules);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr, nullptr);
+    CHECK(items.items()[0].active);
+
+    items.tick(player, nullptr, nullptr);
+    CHECK(player.combat().owned[static_cast<std::size_t>(sim::WeaponId::Shotgun1)]);
+}
+
+TEST_CASE("deathmatch items respawn after pickup", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem invul;
+    invul.position = {100, 100};
+    invul.type = map::ItemType::Invul;
+    doc.items.push_back(invul);
+
+    sim::GameRules rules;
+    rules.mode = sim::GameMode::Deathmatch;
+
+    sim::ItemSystem items;
+    items.reset(doc, rules);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr, nullptr);
+    CHECK_FALSE(items.items()[0].active);
+    CHECK(items.items()[0].respawnable);
+
+    player.snap_to(0.0f, 0.0f);
+    for (int i = 0; i < sim::kDefaultItemRespawnTicks; ++i) {
+        items.tick(player, nullptr, nullptr);
+    }
+    CHECK(items.items()[0].active);
+    CHECK(items.items()[0].respawn_anim_tick > 0);
+}
+
+TEST_CASE("falling item moves downward with gravity", "[sim][items]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {256, 16};
+
+    map::MapItem key;
+    key.position = {100, 50};
+    key.type = map::ItemType::KeyRed;
+    key.fall = true;
+    doc.items.push_back(key);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+
+    const float start_y = items.items()[0].y;
+    for (int i = 0; i < 120; ++i) {
+        items.tick(player, &collision, nullptr);
+    }
+    CHECK(items.items()[0].y > start_y);
+}
+
+TEST_CASE("map monsters load from JSON", "[sim][monsters]") {
+    const auto map_path =
+        std::filesystem::path(D2DF_SOURCE_DIR) / "assets/content/maps/doom2d/map08.json";
+    if (!std::filesystem::exists(map_path)) {
+        SKIP("map08.json not available");
+    }
+
+    const auto doc = map::load_map_json_v1(map_path);
+    CHECK_FALSE(doc.monsters.empty());
+
+    ecs::GameWorld world;
+    world.reset_player(doc);
+    CHECK(world.targets().size() == doc.monsters.size());
+    CHECK(world.targets().front().is_monster());
+}
+
+TEST_CASE("spawn loadout includes pistol with 50 bullets", "[sim][player]") {
+    sim::PlayerState player;
+    player.reset_to_spawn(0.0f, 0.0f);
+
+    CHECK(player.combat().owned[static_cast<std::size_t>(sim::WeaponId::Pistol)]);
+    CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Bullets)] == 50);
+}
+
+TEST_CASE("teleport preserves weapons and ammo", "[sim][triggers]") {
+    map::MapDocument doc;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trigger = doc.triggers.back();
+    trigger.type = map::TriggerType::Teleport;
+    trigger.position = {0, 0};
+    trigger.size = {32, 32};
+    trigger.activate = map::ActivateType::PlayerCollide;
+    trigger.teleport_target = {200, 100};
+    trigger.d2d = true;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::PlayerState player;
+    player.reset_to_spawn(4.0f, 4.0f);
+    own_weapon(player.combat(), sim::WeaponId::Chaingun);
+    give_ammo(player.combat(), sim::AmmoType::Bullets, 100);
+    player.combat().select_weapon(sim::WeaponId::Chaingun);
+
+    triggers.update(player, false);
+
+    CHECK(player.combat().owned[static_cast<std::size_t>(sim::WeaponId::Chaingun)]);
+    CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Bullets)] == 100);
+    CHECK(player.combat().current_weapon == sim::WeaponId::Chaingun);
+    CHECK(std::abs(player.x - (200.0f - sim::PlayerState::width * 0.5f)) < 0.01f);
 }

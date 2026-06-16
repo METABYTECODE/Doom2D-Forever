@@ -51,9 +51,11 @@ d2df_set_warnings(d2df_resources)
 add_library(d2df_map STATIC
     src/map/area_types.cpp
     src/map/item_types.cpp
+    src/map/key_types.cpp
     src/map/map_catalog.cpp
     src/map/map_json_loader.cpp
     src/map/map_spawn.cpp
+    src/map/monster_types.cpp
     src/map/panel_types.cpp
     src/map/trigger_types.cpp
 )

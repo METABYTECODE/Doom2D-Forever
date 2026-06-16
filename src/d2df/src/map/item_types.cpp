@@ -96,6 +96,27 @@ ItemType item_type_from_name(std::string_view name) {
     if (name == "ITEM_KEY_BLUE") {
         return ItemType::KeyBlue;
     }
+    if (name == "ITEM_SUIT") {
+        return ItemType::Suit;
+    }
+    if (name == "ITEM_OXYGEN") {
+        return ItemType::Oxygen;
+    }
+    if (name == "ITEM_INVUL") {
+        return ItemType::Invul;
+    }
+    if (name == "ITEM_INVIS") {
+        return ItemType::Invis;
+    }
+    if (name == "ITEM_BOTTLE") {
+        return ItemType::Bottle;
+    }
+    if (name == "ITEM_HELMET") {
+        return ItemType::Helmet;
+    }
+    if (name == "ITEM_JETPACK") {
+        return ItemType::Jetpack;
+    }
     return ItemType::None;
 }
 
@@ -166,6 +187,39 @@ ItemDimensions item_dimensions(ItemType type) {
     }
 }
 
+bool item_is_weapon(ItemType type) {
+    switch (type) {
+    case ItemType::WeaponKnuckles:
+    case ItemType::WeaponPistol:
+    case ItemType::WeaponSaw:
+    case ItemType::WeaponShotgun1:
+    case ItemType::WeaponShotgun2:
+    case ItemType::WeaponChaingun:
+    case ItemType::WeaponRocketLauncher:
+    case ItemType::WeaponPlasma:
+    case ItemType::WeaponBfg:
+    case ItemType::WeaponSuperChaingun:
+    case ItemType::WeaponFlamethrower:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool item_respawns_in_multiplayer(ItemType type) {
+    if (type == ItemType::None) {
+        return false;
+    }
+    switch (type) {
+    case ItemType::KeyRed:
+    case ItemType::KeyGreen:
+    case ItemType::KeyBlue:
+        return false;
+    default:
+        return true;
+    }
+}
+
 bool item_respawns_in_single_player(ItemType type) {
     switch (type) {
     case ItemType::MedkitSmall:
@@ -200,13 +254,15 @@ ItemSprite item_sprite(ItemType type) {
         return {"tex.ui.bmed", 0, 0};
     case ItemType::ArmorGreen:
     case ItemType::ArmorBlue:
-        return {type == ItemType::ArmorGreen ? "tex.ui.armorgreen" : "tex.ui.armorblue", 32, 16};
+        return {type == ItemType::ArmorGreen ? "tex.ui.armorgreen" : "tex.ui.armorblue", 32, 16, 3,
+                20};
     case ItemType::SphereBlue:
     case ItemType::SphereWhite:
-        return {type == ItemType::SphereBlue ? "tex.ui.sblue" : "tex.ui.swhite", 32, 32};
+        return {type == ItemType::SphereBlue ? "tex.ui.sblue" : "tex.ui.swhite", 32, 32, 4,
+                type == ItemType::SphereBlue ? 15 : 20};
     case ItemType::Invul:
     case ItemType::Invis:
-        return {type == ItemType::Invul ? "tex.ui.invul" : "tex.ui.invis", 32, 32};
+        return {type == ItemType::Invul ? "tex.ui.invul" : "tex.ui.invis", 32, 32, 4, 20};
     case ItemType::WeaponSaw:
         return {"tex.ui.saw", 0, 0};
     case ItemType::WeaponShotgun1:
@@ -254,11 +310,15 @@ ItemSprite item_sprite(ItemType type) {
     case ItemType::KeyBlue:
         return {"tex.ui.keyb", 0, 0};
     case ItemType::Bottle:
-        return {"tex.ui.bottle", 16, 32};
+        return {"tex.ui.bottle", 16, 32, 4, 20};
     case ItemType::Helmet:
-        return {"tex.ui.helmet", 16, 16};
+        return {"tex.ui.helmet", 16, 16, 4, 20};
     case ItemType::Jetpack:
-        return {"tex.ui.jetpack", 32, 32};
+        return {"tex.ui.jetpack", 32, 32, 3, 15};
+    case ItemType::Suit:
+        return {"tex.ui.suit", 0, 0};
+    case ItemType::Oxygen:
+        return {"tex.ui.oxygen", 0, 0};
     default:
         return {nullptr, 0, 0};
     }

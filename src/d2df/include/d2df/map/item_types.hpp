@@ -64,6 +64,9 @@ struct ItemSprite {
     /// Sub-rectangle inside the texture; 0 means use the full texture width/height.
     int frame_width = 0;
     int frame_height = 0;
+    int frame_count = 1;
+    /// Ticks per animation frame; 0 means static.
+    int anim_period = 0;
 };
 
 [[nodiscard]] ItemType item_type_from_name(std::string_view name);
@@ -71,5 +74,7 @@ struct ItemSprite {
 [[nodiscard]] ItemSprite item_sprite(ItemType type);
 [[nodiscard]] const char* item_texture_asset_id(ItemType type);
 [[nodiscard]] bool item_respawns_in_single_player(ItemType type);
+[[nodiscard]] bool item_respawns_in_multiplayer(ItemType type);
+[[nodiscard]] bool item_is_weapon(ItemType type);
 
 } // namespace d2df::map

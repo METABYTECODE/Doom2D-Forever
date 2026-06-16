@@ -4,12 +4,14 @@
 #include <spdlog/spdlog.h>
 
 #include <cmath>
+#include <algorithm>
 
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/map/map_catalog.hpp>
 #include <d2df/map/item_types.hpp>
 #include <d2df/map/map_json_loader.hpp>
+#include <d2df/sim/item_system.hpp>
 
 namespace d2df {
 namespace {
@@ -289,7 +291,7 @@ void MapViewer::fixed_update() {
     auto& player = world_.player();
     collision_.build_from_panels(triggers_.panels());
     world_.fixed_update(collision_, input, events_, map_.size.width, map_.size.height, &triggers_);
-    triggers_.update(player, key_use_edge_, events_);
+    triggers_.update(player, key_use_edge_, events_, &world_.targets());
     key_use_edge_ = false;
 
     if (!player.alive()) {
@@ -424,8 +426,10 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
         return;
     }
 
+    SDL_Texture* respawn_texture = textures_->get("tex.ui.itemrespawn");
+
     for (const auto& item : world_.items().items()) {
-        if (!item.active) {
+        if (!item.active && item.respawn_anim_tick <= 0) {
             continue;
         }
 
@@ -435,6 +439,35 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
         int dst_h = 0;
         camera_.world_rect_to_screen(item.x, item.y, item.width, item.height, viewport_w,
                                      viewport_h, dst_x, dst_y, dst_w, dst_h);
+
+        if (item.respawn_anim_tick > 0 && respawn_texture != nullptr) {
+            const int elapsed = sim::kItemRespawnAnimTotalTicks - item.respawn_anim_tick;
+            const int frame = std::min(
+                elapsed / sim::kItemRespawnAnimFramePeriod, sim::kItemRespawnAnimFrames - 1);
+            const int frame_size = 32;
+
+            int anim_dst_x = 0;
+            int anim_dst_y = 0;
+            int anim_dst_w = 0;
+            int anim_dst_h = 0;
+            const float center_x = item.x + item.width * 0.5f - static_cast<float>(frame_size) * 0.5f;
+            const float center_y =
+                item.y + item.height * 0.5f - static_cast<float>(frame_size) * 0.5f;
+            camera_.world_rect_to_screen(center_x, center_y, static_cast<float>(frame_size),
+                                         static_cast<float>(frame_size), viewport_w, viewport_h,
+                                         anim_dst_x, anim_dst_y, anim_dst_w, anim_dst_h);
+            if (anim_dst_w > 0 && anim_dst_h > 0) {
+                SDL_SetTextureAlphaMod(respawn_texture, 255);
+                SDL_SetTextureBlendMode(respawn_texture, SDL_BLENDMODE_BLEND);
+                const SDL_Rect src{frame * frame_size, 0, frame_size, frame_size};
+                const SDL_Rect anim_dst{anim_dst_x, anim_dst_y, anim_dst_w, anim_dst_h};
+                SDL_RenderCopy(renderer_, respawn_texture, &src, &anim_dst);
+            }
+        }
+
+        if (!item.active) {
+            continue;
+        }
 
         if (dst_w <= 0 || dst_h <= 0) {
             continue;
@@ -452,6 +485,10 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
             if (tex_w > 0 && tex_h > 0) {
                 const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
                 const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
+                const int frame_index =
+                    sprite.frame_count > 1 && sprite.anim_period > 0
+                        ? (item.anim_tick / sprite.anim_period) % sprite.frame_count
+                        : 0;
 
                 int sprite_dst_x = 0;
                 int sprite_dst_y = 0;
@@ -465,7 +502,7 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
                 if (sprite_dst_w > 0 && sprite_dst_h > 0) {
                     SDL_SetTextureAlphaMod(texture, 255);
                     SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-                    const SDL_Rect src{0, 0, frame_w, frame_h};
+                    const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
                     const SDL_Rect sprite_dst{sprite_dst_x, sprite_dst_y, sprite_dst_w,
                                               sprite_dst_h};
                     SDL_RenderCopy(renderer_, texture, &src, &sprite_dst);
@@ -488,6 +525,12 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
             SDL_SetRenderDrawColor(renderer_, 60, 220, 60, 220);
         } else if (type == map::ItemType::KeyBlue) {
             SDL_SetRenderDrawColor(renderer_, 60, 120, 255, 220);
+        } else if (type == map::ItemType::Invul) {
+            SDL_SetRenderDrawColor(renderer_, 255, 80, 80, 220);
+        } else if (type == map::ItemType::Invis) {
+            SDL_SetRenderDrawColor(renderer_, 180, 180, 255, 180);
+        } else if (type == map::ItemType::Suit) {
+            SDL_SetRenderDrawColor(renderer_, 80, 220, 180, 220);
         } else if (type >= map::ItemType::AmmoBullets && type <= map::ItemType::AmmoBackpack) {
             SDL_SetRenderDrawColor(renderer_, 240, 200, 60, 220);
         } else if (type == map::ItemType::SphereBlue || type == map::ItemType::SphereWhite) {
@@ -521,7 +564,11 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
         camera_.world_rect_to_screen(target.x, target.y, target.width, target.height, viewport_w,
                                      viewport_h, dst_x, dst_y, dst_w, dst_h);
 
-        SDL_SetRenderDrawColor(renderer_, 200, 48, 48, 220);
+        if (target.is_monster()) {
+            SDL_SetRenderDrawColor(renderer_, 180, 60, 200, 220);
+        } else {
+            SDL_SetRenderDrawColor(renderer_, 200, 48, 48, 220);
+        }
         const SDL_Rect rect{dst_x, dst_y, dst_w, dst_h};
         SDL_RenderFillRect(renderer_, &rect);
         SDL_SetRenderDrawColor(renderer_, 255, 200, 200, 255);

@@ -4,6 +4,7 @@
 #include <d2df/core/game_events.hpp>
 #include <d2df/ecs/components/network_identity.hpp>
 #include <d2df/map/map_spawn.hpp>
+#include <d2df/map/monster_types.hpp>
 
 namespace d2df::ecs {
 namespace {
@@ -34,18 +35,42 @@ void GameWorld::reset_player(const map::MapDocument& map) {
 
     spawn_point_ = map::find_player_spawn(map);
     if (spawn_point_) {
-        player_.snap_to(static_cast<float>(spawn_point_->x), static_cast<float>(spawn_point_->y));
+        player_.reset_to_spawn(static_cast<float>(spawn_point_->x), static_cast<float>(spawn_point_->y));
     } else {
-        player_.snap_to(static_cast<float>(map.size.width) * 0.5f,
-                        static_cast<float>(map.size.height) * 0.5f);
+        player_.reset_to_spawn(static_cast<float>(map.size.width) * 0.5f,
+                               static_cast<float>(map.size.height) * 0.5f);
     }
 
     targets_.clear();
     projectiles_.clear();
     items_.reset(map);
-    spawn_debug_target(map);
+    spawn_map_monsters(map);
+    if (targets_.empty()) {
+        spawn_debug_target(map);
+    }
 
     sync_to_ecs();
+}
+
+void GameWorld::spawn_map_monsters(const map::MapDocument& map) {
+    EntityId next_id = kDebugTargetBaseId;
+    for (const auto& map_monster : map.monsters) {
+        if (map_monster.type == map::MonsterType::None) {
+            continue;
+        }
+
+        const auto stats = map::monster_stats(map_monster.type);
+        sim::ShootableTarget target;
+        target.id = next_id++;
+        target.monster_type = map_monster.type;
+        target.x = static_cast<float>(map_monster.position.x);
+        target.y = static_cast<float>(map_monster.position.y);
+        target.width = stats.width;
+        target.height = stats.height;
+        target.max_health = stats.health;
+        target.health = stats.health;
+        targets_.push_back(target);
+    }
 }
 
 void GameWorld::spawn_debug_target(const map::MapDocument& map) {
@@ -66,7 +91,7 @@ void GameWorld::spawn_debug_target(const map::MapDocument& map) {
 
 void GameWorld::respawn_player() {
     if (spawn_point_) {
-        player_.snap_to(static_cast<float>(spawn_point_->x), static_cast<float>(spawn_point_->y));
+        player_.reset_to_spawn(static_cast<float>(spawn_point_->x), static_cast<float>(spawn_point_->y));
     } else {
         player_.restore_health();
     }
@@ -96,12 +121,16 @@ void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInpu
 
     projectiles_.tick(collision, triggers, player_, targets_, events, map_width, map_height);
 
-    items_.tick(player_, events);
+    items_.tick(player_, &collision, events);
 
     sync_to_ecs();
 }
 
 void GameWorld::apply_environment_damage(const sim::MapCollision& collision, EventBus* events) {
+    if (player_.has_suit()) {
+        return;
+    }
+
     if (player_.tick() % sim::PlayerState::kAcidDamagePeriod != 0) {
         return;
     }

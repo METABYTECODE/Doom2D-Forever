@@ -71,4 +71,9 @@ struct ItemPickedUp {
     std::uint8_t item_type = 0;
 };
 
+struct ItemRespawned {
+    float x = 0.f;
+    float y = 0.f;
+};
+
 } // namespace d2df::events

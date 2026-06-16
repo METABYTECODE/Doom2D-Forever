@@ -2,6 +2,8 @@
 
 #include <d2df/map/item_types.hpp>
 #include <d2df/map/map_document.hpp>
+#include <d2df/sim/game_rules.hpp>
+#include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
 
 #include <vector>
@@ -17,29 +19,40 @@ namespace d2df::sim {
 constexpr int kGameTicksPerSecond = 36;
 constexpr int kDefaultItemRespawnSeconds = 60;
 constexpr int kDefaultItemRespawnTicks = kDefaultItemRespawnSeconds * kGameTicksPerSecond;
+constexpr int kItemRespawnAnimFrames = 5;
+constexpr int kItemRespawnAnimFramePeriod = 4;
+constexpr int kItemRespawnAnimTotalTicks = kItemRespawnAnimFrames * kItemRespawnAnimFramePeriod;
 
 struct WorldItem {
     map::ItemType type = map::ItemType::None;
     float x = 0.0f;
     float y = 0.0f;
+    float spawn_x = 0.0f;
+    float spawn_y = 0.0f;
     float width = 16.0f;
     float height = 16.0f;
     bool active = true;
     bool respawnable = false;
+    bool fall = false;
+    int vel_x = 0;
+    int vel_y = 0;
+    int anim_tick = 0;
+    int respawn_anim_tick = 0;
     int respawn_countdown = 0;
 };
 
 class ItemSystem {
 public:
-    void reset(const map::MapDocument& map, bool single_player = true);
+    void reset(const map::MapDocument& map, const GameRules& rules = {});
 
-    void tick(PlayerState& player, EventBus* events);
+    void tick(PlayerState& player, const MapCollision* collision, EventBus* events);
 
     [[nodiscard]] const std::vector<WorldItem>& items() const { return items_; }
+    [[nodiscard]] const GameRules& rules() const { return rules_; }
 
 private:
     std::vector<WorldItem> items_;
-    bool single_player_ = true;
+    GameRules rules_;
 };
 
 } // namespace d2df::sim
