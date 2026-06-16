@@ -49,6 +49,7 @@ struct Projectile {
     int timeout = 0;
     int spawn_grace_ticks = 0;
     int anim_tick = 0;
+    EntityId homing_target_id = 0;
 };
 
 class TriggerSystem;
@@ -85,7 +86,7 @@ private:
                         float aim_y, EntityId shooter_id, int damage, float size, int speed,
                         int lifetime);
     void spawn_skelfire(float muzzle_x, float muzzle_y, float aim_x, float aim_y,
-                        EntityId shooter_id);
+                        EntityId shooter_id, EntityId homing_target_id);
     void destroy_projectile(std::size_t index);
     void explode_rocket(std::size_t index, TriggerSystem* triggers, PlayerState& player,
                         std::vector<ShootableTarget>& targets, EventBus* events);

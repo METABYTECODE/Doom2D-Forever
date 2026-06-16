@@ -17,6 +17,7 @@
 #include <d2df/sim/effect_types.hpp>
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/projectile_types.hpp>
+#include <d2df/sim/player_types.hpp>
 #include <d2df/sim/weapon_types.hpp>
 
 namespace d2df {
@@ -498,15 +499,70 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
 
     const auto& player = world_.player();
     const float alpha = fixed_timestep_.render_alpha();
-    const float px = player.render_x(alpha);
-    const float py = player.render_y(alpha);
+    const float hitbox_x = player.render_x(alpha);
+    const float hitbox_y = player.render_y(alpha);
+
+    const auto& combat = player.combat();
+    const bool firing = combat.is_reloading(combat.current_weapon);
+    const auto anim = sim::resolve_player_anim(
+        player.on_ground(), player.vel_x, key_aim_up_, key_aim_down_, firing,
+        combat.current_weapon);
+    const auto sprite = sim::player_sprite(anim);
+    const auto placement =
+        sim::player_sprite_placement(hitbox_x, hitbox_y, combat.facing_left);
+
+    SDL_Texture* texture =
+        sprite.texture_id != nullptr ? textures_->get(sprite.texture_id) : nullptr;
+
+    if (texture != nullptr) {
+        int tex_w = 0;
+        int tex_h = 0;
+        SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+        if (tex_w > 0 && tex_h > 0) {
+            const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
+            const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
+            const int frames_in_texture = frame_w > 0 ? std::max(1, tex_w / frame_w) : 1;
+            const int frame_count = std::min(sprite.frame_count, frames_in_texture);
+
+            int frame_index = 0;
+            if (anim == sim::PlayerAnim::Walk) {
+                frame_index = sim::player_walk_frame_index(player.tick(), player.vel_x);
+            } else if (frame_count > 1 && sprite.anim_period > 0) {
+                frame_index = (player.tick() / sprite.anim_period) % frame_count;
+            }
+            frame_index = std::clamp(frame_index, 0, std::max(0, frame_count - 1));
+
+            int sprite_dst_x = 0;
+            int sprite_dst_y = 0;
+            int sprite_dst_w = 0;
+            int sprite_dst_h = 0;
+            camera_.world_rect_to_screen(placement.x, placement.y, static_cast<float>(frame_w),
+                                         static_cast<float>(frame_h), viewport_w, viewport_h,
+                                         sprite_dst_x, sprite_dst_y, sprite_dst_w, sprite_dst_h);
+
+            if (sprite_dst_w > 0 && sprite_dst_h > 0) {
+                const Uint8 draw_alpha = player.has_invis() ? 200 : 255;
+                SDL_SetTextureAlphaMod(texture, draw_alpha);
+                SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+                const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
+                const SDL_Rect sprite_dst{sprite_dst_x, sprite_dst_y, sprite_dst_w, sprite_dst_h};
+                if (placement.flip_horizontal) {
+                    SDL_RenderCopyEx(renderer_, texture, &src, &sprite_dst, 0.0, nullptr,
+                                     SDL_FLIP_HORIZONTAL);
+                } else {
+                    SDL_RenderCopy(renderer_, texture, &src, &sprite_dst);
+                }
+                return;
+            }
+        }
+    }
 
     int dst_x = 0;
     int dst_y = 0;
     int dst_w = 0;
     int dst_h = 0;
-    camera_.world_rect_to_screen(px, py, player.width, player.height, viewport_w, viewport_h, dst_x,
-                                 dst_y, dst_w, dst_h);
+    camera_.world_rect_to_screen(hitbox_x, hitbox_y, player.width, player.height, viewport_w,
+                                 viewport_h, dst_x, dst_y, dst_w, dst_h);
 
     if (player.in_water()) {
         SDL_SetRenderDrawColor(renderer_, 48, 120, 200, 220);

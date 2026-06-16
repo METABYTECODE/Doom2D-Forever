@@ -153,6 +153,38 @@ void publish_projectile_explosion(EventBus* events, ProjectileKind kind, float c
     events->publish(events::WorldExplosion{*explosion_kind, cx, cy});
 }
 
+bool resolve_homing_aim(EntityId target_id, const PlayerState& player,
+                        const std::vector<ShootableTarget>& targets, float& aim_x, float& aim_y) {
+    if (target_id == kPlayerEntityId) {
+        if (!player.alive()) {
+            return false;
+        }
+        aim_x = player.x + player.width * 0.5f + static_cast<float>(player.vel_x);
+        aim_y = player.y + player.height * 0.5f + static_cast<float>(player.vel_y);
+        return true;
+    }
+
+    for (const auto& target : targets) {
+        if (target.id != target_id || !target.alive()) {
+            continue;
+        }
+        aim_x = target.x + target.width * 0.5f + static_cast<float>(target.vel_x);
+        aim_y = target.y + target.height * 0.5f + static_cast<float>(target.vel_y);
+        return true;
+    }
+    return false;
+}
+
+void retarget_homing_projectile(Projectile& projectile, const PlayerState& player,
+                                const std::vector<ShootableTarget>& targets, int speed) {
+    float aim_x = 0.0f;
+    float aim_y = 0.0f;
+    if (!resolve_homing_aim(projectile.homing_target_id, player, targets, aim_x, aim_y)) {
+        return;
+    }
+    set_velocity_toward(projectile, projectile.x, projectile.y, aim_x, aim_y, speed);
+}
+
 } // namespace
 
 void ProjectileSystem::clear() {
@@ -277,7 +309,7 @@ void ProjectileSystem::spawn_rocket(float muzzle_x, float muzzle_y, float aim_x,
 }
 
 void ProjectileSystem::spawn_skelfire(float muzzle_x, float muzzle_y, float aim_x, float aim_y,
-                                      EntityId shooter_id) {
+                                      EntityId shooter_id, EntityId homing_target_id) {
     const std::size_t index = allocate_slot();
     auto& projectile = projectiles_[index];
     projectile = {};
@@ -285,6 +317,7 @@ void ProjectileSystem::spawn_skelfire(float muzzle_x, float muzzle_y, float aim_
     projectile.kind = ProjectileKind::SkelFire;
     projectile.weapon = WeaponId::RocketLauncher;
     projectile.shooter_id = shooter_id;
+    projectile.homing_target_id = homing_target_id;
     projectile.damage = kRocketDirectDamage;
     projectile.width = kSkelFireWidth;
     projectile.height = kSkelFireHeight;
@@ -370,7 +403,7 @@ void ProjectileSystem::spawn_monster_attack(map::MonsterType type, float muzzle_
         spawn_rocket(muzzle_x, muzzle_y, aim_x, aim_y, shooter_id);
         break;
     case map::MonsterType::Skel:
-        spawn_skelfire(muzzle_x, muzzle_y, aim_x, aim_y, shooter_id);
+        spawn_skelfire(muzzle_x, muzzle_y, aim_x, aim_y, shooter_id, kPlayerEntityId);
         break;
     case map::MonsterType::Bsp:
         spawn_fireball(ProjectileKind::BspFire, muzzle_x, muzzle_y, aim_x, aim_y, shooter_id, 10,
@@ -405,14 +438,10 @@ void ProjectileSystem::explode_rocket(std::size_t index, TriggerSystem* triggers
     const float cx = projectile.x + projectile.width * 0.5f;
     const float cy = projectile.y + projectile.height * 0.5f;
 
-    if (triggers != nullptr) {
-        triggers->press_shot_circle(cx, cy, static_cast<float>(kRocketExplosionRadius), player,
-                                    events);
-    }
+    apply_area_explosion(cx, cy, static_cast<float>(kRocketExplosionRadius), kRocketExplosionDamage,
+                         player, targets, projectile.shooter_id, events,
+                         events::DamageSource::Projectile, triggers);
 
-    apply_damage_to_targets(targets, cx, cy, static_cast<float>(kRocketExplosionRadius),
-                          kRocketExplosionDamage, projectile.shooter_id, events,
-                          events::DamageSource::Projectile);
     if (events != nullptr) {
         const auto explosion_kind = projectile.kind == ProjectileKind::SkelFire
                                         ? events::ExplosionKind::SkelFire
@@ -428,14 +457,10 @@ void ProjectileSystem::explode_bfg(std::size_t index, TriggerSystem* triggers, P
     const float cx = projectile.x + projectile.width * 0.5f;
     const float cy = projectile.y + projectile.height * 0.5f;
 
-    if (triggers != nullptr) {
-        triggers->press_shot_circle(cx, cy, static_cast<float>(kBfgExplosionRadius), player,
-                                    events);
-    }
+    apply_area_explosion(cx, cy, static_cast<float>(kBfgExplosionRadius), kBfgSplashDamage, player,
+                         targets, projectile.shooter_id, events, events::DamageSource::Projectile,
+                         triggers);
 
-    apply_damage_to_targets(targets, cx, cy, static_cast<float>(kBfgExplosionRadius),
-                            kBfgSplashDamage, projectile.shooter_id, events,
-                            events::DamageSource::Projectile);
     if (events != nullptr) {
         events->publish(events::WorldExplosion{events::ExplosionKind::Bfg, cx, cy});
     }
@@ -561,7 +586,13 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
     }
 
     if (projectile.kind == ProjectileKind::Rocket || projectile.kind == ProjectileKind::SkelFire) {
-        if (hit_solid || hit_target) {
+        const bool from_player = projectile.shooter_id == kPlayerEntityId;
+        const bool hit_player =
+            can_collide && !from_player && player.alive() &&
+            rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height, player.x,
+                          player.y, player.width, player.height);
+
+        if (hit_solid || hit_target || hit_player) {
             if (hit_target) {
                 auto& target = targets[hit_target_index];
                 const int health_before = target.health;
@@ -570,7 +601,19 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
                                       health_before - target.health,
                                       events::DamageSource::Projectile, target.health);
             }
+            if (hit_player) {
+                const int health_before = player.health();
+                player.apply_damage(kRocketDirectDamage);
+                publish_player_projectile_damage(events, health_before - player.health(),
+                                                 player.health());
+            }
             explode_rocket(index, triggers, player, targets, events);
+            return;
+        }
+
+        if (projectile.kind == ProjectileKind::SkelFire && can_collide &&
+            projectile.homing_target_id != 0) {
+            retarget_homing_projectile(projectile, player, targets, kSkelFireSpeed);
         }
         return;
     }

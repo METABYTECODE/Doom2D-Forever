@@ -31,6 +31,7 @@
 #include <d2df/sim/shootable_target.hpp>
 #include <d2df/sim/trigger_system.hpp>
 #include <d2df/sim/weapon_system.hpp>
+#include <d2df/sim/player_types.hpp>
 #include <d2df/sim/weapon_types.hpp>
 
 using namespace d2df;
@@ -2028,6 +2029,69 @@ TEST_CASE("explosion kind mapping matches projectile types", "[sim][combat]") {
           "sfx.world.explodeball");
 }
 
+TEST_CASE("rocket explosion splash damages nearby player", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {200, 100};
+    wall.size = {32, 32};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(215.0f, 108.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ProjectileSystem projectiles;
+    projectiles.spawn_rocket(120.0f, 116.0f, 400.0f, 116.0f, 2);
+
+    const int health_before = player.health();
+    for (int i = 0; i < 80; ++i) {
+        projectiles.tick(collision, nullptr, player, targets, nullptr, doc.size.width,
+                         doc.size.height);
+    }
+
+    CHECK(player.health() < health_before);
+}
+
+TEST_CASE("skelfire homes toward moving player", "[sim][monsters]") {
+    sim::MapCollision collision;
+    collision.build_from_map(map::MapDocument{});
+
+    sim::PlayerState player;
+    player.snap_to(400.0f, 200.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ProjectileSystem projectiles;
+    projectiles.spawn_monster_attack(map::MonsterType::Skel, 100.0f, 200.0f, 417.0f, 226.0f, 500);
+
+    const sim::Projectile* skel_shot = nullptr;
+    for (const auto& projectile : projectiles.projectiles()) {
+        if (projectile.active && projectile.kind == sim::ProjectileKind::SkelFire) {
+            skel_shot = &projectile;
+            break;
+        }
+    }
+    REQUIRE(skel_shot != nullptr);
+    const int initial_vel_x = skel_shot->vel_x;
+
+    player.snap_to(500.0f, 260.0f);
+    for (int i = 0; i < 6; ++i) {
+        projectiles.tick(collision, nullptr, player, targets, nullptr, 512, 512);
+    }
+
+    for (const auto& projectile : projectiles.projectiles()) {
+        if (projectile.active && projectile.kind == sim::ProjectileKind::SkelFire) {
+            CHECK(projectile.vel_x > 0);
+            CHECK(projectile.vel_y > 0);
+            CHECK(projectile.vel_x >= initial_vel_x);
+            break;
+        }
+    }
+}
+
 TEST_CASE("barrel explosion damages nearby player", "[sim][monsters]") {
     ecs::GameWorld world;
     map::MapDocument doc;
@@ -2417,4 +2481,32 @@ TEST_CASE("Monster alert fires once when player is spotted", "[sim][audio]") {
 
     monsters.tick(collision, player, targets, &bus);
     CHECK(alert_events == 1);
+}
+
+TEST_CASE("player anim resolves stand walk aim and fire states", "[sim][player]") {
+    using sim::PlayerAnim;
+    using sim::WeaponId;
+
+    CHECK(sim::resolve_player_anim(true, 0, false, false, false, WeaponId::Pistol) ==
+          PlayerAnim::Stand);
+    CHECK(sim::resolve_player_anim(true, 5, false, false, false, WeaponId::Pistol) ==
+          PlayerAnim::Walk);
+    CHECK(sim::resolve_player_anim(true, 0, true, false, false, WeaponId::Pistol) ==
+          PlayerAnim::SeeUp);
+    CHECK(sim::resolve_player_anim(true, 0, false, true, false, WeaponId::Pistol) ==
+          PlayerAnim::SeeDown);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, true, WeaponId::Pistol) ==
+          PlayerAnim::Attack);
+    CHECK(sim::resolve_player_anim(true, 0, true, false, true, WeaponId::Pistol) ==
+          PlayerAnim::AttackUp);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, true, WeaponId::Saw) == PlayerAnim::Stand);
+
+    CHECK(sim::player_walk_frame_index(0, 8) == 0);
+    CHECK(sim::player_walk_frame_index(4, 8) == 2);
+    CHECK(sim::player_walk_frame_index(4, 2) == 0);
+
+    const auto placement = sim::player_sprite_placement(100.0f, 200.0f, false);
+    CHECK(placement.x == 85.0f);
+    CHECK(placement.y == 188.0f);
+    CHECK_FALSE(placement.flip_horizontal);
 }
