@@ -19,6 +19,13 @@ public:
     void reset(const map::MapDocument& map);
     void update(PlayerState& player, bool use_pressed, EventBus* events = nullptr);
 
+    void press_shot_line(float x1, float y1, float x2, float y2, PlayerState& player,
+                         EventBus* events);
+    void press_shot_rect(float x, float y, float width, float height, PlayerState& player,
+                         EventBus* events);
+    void press_shot_circle(float cx, float cy, float radius, PlayerState& player,
+                           EventBus* events);
+
     [[nodiscard]] bool consume_exit_request();
     [[nodiscard]] const std::vector<map::MapPanel>& panels() const { return panels_; }
     [[nodiscard]] map::MapDocument map_view(const map::MapDocument& base) const;

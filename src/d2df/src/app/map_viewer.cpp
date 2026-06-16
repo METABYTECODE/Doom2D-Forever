@@ -8,6 +8,7 @@
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/map/map_catalog.hpp>
+#include <d2df/map/item_types.hpp>
 #include <d2df/map/map_json_loader.hpp>
 
 namespace d2df {
@@ -100,6 +101,39 @@ void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
     case SDL_SCANCODE_PAGEDOWN:
         cycle_map(1);
         return;
+    case SDL_SCANCODE_1:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Knuckles);
+        return;
+    case SDL_SCANCODE_2:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Pistol);
+        return;
+    case SDL_SCANCODE_3:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Chaingun);
+        return;
+    case SDL_SCANCODE_4:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Shotgun1);
+        return;
+    case SDL_SCANCODE_5:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::RocketLauncher);
+        return;
+    case SDL_SCANCODE_6:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Plasma);
+        return;
+    case SDL_SCANCODE_7:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Saw);
+        return;
+    case SDL_SCANCODE_8:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Shotgun2);
+        return;
+    case SDL_SCANCODE_9:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Flamethrower);
+        return;
+    case SDL_SCANCODE_0:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Bfg);
+        return;
+    case SDL_SCANCODE_MINUS:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::SuperChaingun);
+        return;
     default:
         break;
     }
@@ -110,7 +144,6 @@ void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
     case SDLK_KP_PLUS:
         camera_.zoom_in();
         break;
-    case SDLK_MINUS:
     case SDLK_KP_MINUS:
         camera_.zoom_out();
         break;
@@ -141,6 +174,7 @@ void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
     case SDLK_w:
     case SDLK_UP:
         key_jump_ = true;
+        key_aim_up_ = true;
         break;
     case SDLK_e:
     case SDLK_f:
@@ -148,6 +182,21 @@ void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
             key_use_edge_ = true;
         }
         key_use_ = true;
+        break;
+    case SDLK_q:
+        key_weapon_prev_ = true;
+        break;
+    case SDLK_b:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::Bfg);
+        break;
+    case SDLK_g:
+        weapon_select_request_ = static_cast<int>(sim::WeaponId::SuperChaingun);
+        break;
+    case SDLK_s:
+    case SDLK_DOWN:
+        if (!key_jump_) {
+            key_aim_down_ = true;
+        }
         break;
     default:
         break;
@@ -168,10 +217,18 @@ void MapViewer::handle_key_up(int sym) {
     case SDLK_w:
     case SDLK_UP:
         key_jump_ = false;
+        key_aim_up_ = false;
         break;
     case SDLK_e:
     case SDLK_f:
         key_use_ = false;
+        break;
+    case SDLK_q:
+        key_weapon_prev_ = false;
+        break;
+    case SDLK_s:
+    case SDLK_DOWN:
+        key_aim_down_ = false;
         break;
     default:
         break;
@@ -218,10 +275,20 @@ void MapViewer::fixed_update() {
         return;
     }
 
-    sim::PlayerInput input{key_left_, key_right_, key_jump_};
+    sim::PlayerInput input{key_left_, key_right_, key_jump_, key_aim_up_, key_aim_down_, false,
+                           key_weapon_prev_, false, weapon_select_request_};
+
+    const Uint32 mouse_buttons = SDL_GetMouseState(nullptr, nullptr);
+    if ((mouse_buttons & SDL_BUTTON_LMASK) != 0 || (mouse_buttons & SDL_BUTTON_RMASK) != 0) {
+        input.fire = true;
+    }
+
+    weapon_select_request_ = -1;
+    key_weapon_prev_ = false;
+
     auto& player = world_.player();
     collision_.build_from_panels(triggers_.panels());
-    world_.fixed_update(collision_, input, events_);
+    world_.fixed_update(collision_, input, events_, map_.size.width, map_.size.height, &triggers_);
     triggers_.update(player, key_use_edge_, events_);
     key_use_edge_ = false;
 
@@ -319,19 +386,124 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
     SDL_RenderDrawRect(renderer_, &rect);
 }
 
+void MapViewer::draw_projectiles(int viewport_w, int viewport_h) {
+    if (free_camera_) {
+        return;
+    }
+
+    for (const auto& projectile : world_.projectiles().projectiles()) {
+        if (!projectile.active) {
+            continue;
+        }
+
+        const float alpha = fixed_timestep_.render_alpha();
+        const float px = projectile.prev_x + (projectile.x - projectile.prev_x) * alpha;
+        const float py = projectile.prev_y + (projectile.y - projectile.prev_y) * alpha;
+
+        int dst_x = 0;
+        int dst_y = 0;
+        int dst_w = 0;
+        int dst_h = 0;
+        camera_.world_rect_to_screen(px, py, projectile.width, projectile.height, viewport_w,
+                                     viewport_h, dst_x, dst_y, dst_w, dst_h);
+
+        if (projectile.weapon == sim::WeaponId::Plasma) {
+            SDL_SetRenderDrawColor(renderer_, 80, 200, 255, 240);
+        } else if (projectile.weapon == sim::WeaponId::Bfg) {
+            SDL_SetRenderDrawColor(renderer_, 80, 255, 80, 240);
+        } else {
+            SDL_SetRenderDrawColor(renderer_, 255, 140, 40, 240);
+        }
+        const SDL_Rect rect{dst_x, dst_y, dst_w, dst_h};
+        SDL_RenderFillRect(renderer_, &rect);
+    }
+}
+
+void MapViewer::draw_items(int viewport_w, int viewport_h) {
+    if (free_camera_) {
+        return;
+    }
+
+    for (const auto& item : world_.items().items()) {
+        if (!item.active) {
+            continue;
+        }
+
+        int dst_x = 0;
+        int dst_y = 0;
+        int dst_w = 0;
+        int dst_h = 0;
+        camera_.world_rect_to_screen(item.x, item.y, item.width, item.height, viewport_w,
+                                     viewport_h, dst_x, dst_y, dst_w, dst_h);
+
+        const auto type = item.type;
+        if (type == map::ItemType::MedkitSmall || type == map::ItemType::MedkitLarge ||
+            type == map::ItemType::MedkitBlack) {
+            SDL_SetRenderDrawColor(renderer_, 80, 220, 120, 220);
+        } else if (type >= map::ItemType::AmmoBullets && type <= map::ItemType::AmmoBackpack) {
+            SDL_SetRenderDrawColor(renderer_, 240, 200, 60, 220);
+        } else if (type == map::ItemType::SphereBlue || type == map::ItemType::SphereWhite) {
+            SDL_SetRenderDrawColor(renderer_, 220, 80, 220, 220);
+        } else if (type >= map::ItemType::WeaponSaw && type <= map::ItemType::WeaponFlamethrower) {
+            SDL_SetRenderDrawColor(renderer_, 80, 200, 255, 220);
+        } else {
+            SDL_SetRenderDrawColor(renderer_, 180, 180, 180, 200);
+        }
+
+        const SDL_Rect rect{dst_x, dst_y, dst_w, dst_h};
+        SDL_RenderFillRect(renderer_, &rect);
+        SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 180);
+        SDL_RenderDrawRect(renderer_, &rect);
+    }
+}
+
+void MapViewer::draw_targets(int viewport_w, int viewport_h) {
+    if (free_camera_) {
+        return;
+    }
+
+    for (const auto& target : world_.targets()) {
+        if (!target.alive()) {
+            continue;
+        }
+
+        int dst_x = 0;
+        int dst_y = 0;
+        int dst_w = 0;
+        int dst_h = 0;
+        camera_.world_rect_to_screen(target.x, target.y, target.width, target.height, viewport_w,
+                                     viewport_h, dst_x, dst_y, dst_w, dst_h);
+
+        SDL_SetRenderDrawColor(renderer_, 200, 48, 48, 220);
+        const SDL_Rect rect{dst_x, dst_y, dst_w, dst_h};
+        SDL_RenderFillRect(renderer_, &rect);
+        SDL_SetRenderDrawColor(renderer_, 255, 200, 200, 255);
+        SDL_RenderDrawRect(renderer_, &rect);
+    }
+}
+
 void MapViewer::draw_hud(int viewport_w, int viewport_h) {
     (void)viewport_w;
     const auto& player = world_.player();
+    const auto& combat = player.combat();
     const std::string state = player.on_lift()    ? "lift"
                             : player.on_ground() ? "ground"
                             : player.in_water()  ? "water"
                             : player.in_acid()   ? "acid"
                                                  : "air";
+    const std::string weapon = sim::weapon_display_name(combat.current_weapon);
+    const int ammo = combat.ammo_for_current_weapon();
+    std::string charge;
+    if (combat.bfg_charge_ticks >= 0) {
+        charge = "  [BFG charge " + std::to_string(combat.bfg_charge_ticks) + "]";
+    }
     const std::string hud = map_.name + "  (" + std::to_string(map_index_ + 1) + "/" +
                             std::to_string(map_list_.size()) + ")  HP " +
                             std::to_string(player.health()) + "/" +
-                            std::to_string(sim::PlayerState::kMaxHealth) +
-                            "  |  A/D move  Space jump  E use  PgUp/PgDn maps  C camera  " + state;
+                            std::to_string(sim::PlayerState::kMaxHealth) + "  |  " + weapon +
+                            " " + std::to_string(ammo) + charge +
+                            "  |  1-9 weapons  0/B=BFG  -/G=SuperCG  Q prev  wheel zoom  " +
+                            state;
     text_.draw(renderer_, hud, 8, viewport_h - 24);
 }
 
@@ -341,7 +513,10 @@ void MapViewer::render(int viewport_w, int viewport_h) {
 
     draw_sky(viewport_w, viewport_h);
     map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, viewport_w, viewport_h);
+    draw_items(viewport_w, viewport_h);
     draw_player(viewport_w, viewport_h);
+    draw_targets(viewport_w, viewport_h);
+    draw_projectiles(viewport_w, viewport_h);
     draw_hud(viewport_w, viewport_h);
 }
 

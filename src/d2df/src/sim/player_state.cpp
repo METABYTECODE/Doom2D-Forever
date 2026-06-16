@@ -30,6 +30,7 @@ void PlayerState::snap_to(float spawn_x, float spawn_y) {
     in_acid_ = false;
     on_lift_ = false;
     health_ = kMaxHealth;
+    combat_.reset_single_player_loadout();
 }
 
 bool PlayerState::apply_damage(int amount) {
@@ -42,6 +43,26 @@ bool PlayerState::apply_damage(int amount) {
 
 void PlayerState::restore_health() {
     health_ = kMaxHealth;
+}
+
+bool PlayerState::add_health(int amount, int max_health) {
+    if (health_ >= max_health || amount <= 0) {
+        return false;
+    }
+    health_ = std::min(health_ + amount, max_health);
+    return true;
+}
+
+void PlayerState::set_health(int value) {
+    health_ = std::max(0, value);
+}
+
+void PlayerState::update_facing(bool left, bool right) {
+    if (left && !right) {
+        combat_.facing_left = true;
+    } else if (right && !left) {
+        combat_.facing_left = false;
+    }
 }
 
 void PlayerState::begin_tick() {
@@ -186,6 +207,8 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
     if (!input.left && !input.right && vel_x != 0) {
         vel_x = z_dec(vel_x, 1);
     }
+
+    update_facing(input.left, input.right);
 }
 
 float PlayerState::render_x(float alpha) const {

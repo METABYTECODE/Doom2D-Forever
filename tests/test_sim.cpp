@@ -17,11 +17,28 @@
 #ifndef D2DF_SOURCE_DIR
 #define D2DF_SOURCE_DIR "."
 #endif
+#include <d2df/sim/item_system.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
+#include <d2df/sim/projectile_system.hpp>
+#include <d2df/sim/shootable_target.hpp>
 #include <d2df/sim/trigger_system.hpp>
+#include <d2df/sim/weapon_system.hpp>
+#include <d2df/sim/weapon_types.hpp>
 
 using namespace d2df;
+
+namespace {
+
+void give_ammo(sim::PlayerCombat& combat, sim::AmmoType type, int amount) {
+    combat.ammo[static_cast<std::size_t>(type)] = amount;
+}
+
+void own_weapon(sim::PlayerCombat& combat, sim::WeaponId weapon) {
+    combat.owned[static_cast<std::size_t>(weapon)] = true;
+}
+
+} // namespace
 
 TEST_CASE("FixedTimestep accumulates 36 UPS steps", "[sim]") {
     FixedTimestep ts;
@@ -529,7 +546,7 @@ TEST_CASE("GameWorld publishes PlayerLanded on ground contact", "[sim]") {
 
     sim::PlayerInput none{};
     for (int i = 0; i < 120; ++i) {
-        world.fixed_update(collision, none, &bus);
+        world.fixed_update(collision, none, &bus, doc.size.width, doc.size.height, nullptr);
     }
 
     CHECK(landed_count >= 1);
@@ -699,4 +716,319 @@ TEST_CASE("ACTIVATE_NOMONSTER Press expander fires without monsters", "[sim]") {
     triggers.update(player, false);
 
     CHECK_FALSE(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("MapCollision trace_solid_ray hits wall panel", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {200, 100};
+    wall.size = {32, 32};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    const auto hit = collision.trace_solid_ray(50.0f, 116.0f, 300.0f, 116.0f);
+    REQUIRE(hit.hit);
+    CHECK(hit.x <= 200.0f + 0.5f);
+    CHECK(hit.x >= 199.0f);
+}
+
+TEST_CASE("pistol hitscan damages shootable target", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.combat().facing_left = false;
+    player.combat().select_weapon(sim::WeaponId::Pistol);
+    give_ammo(player.combat(), sim::AmmoType::Bullets, 50);
+    REQUIRE(player.combat().has_ammo_for_weapon(sim::WeaponId::Pistol));
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget target;
+    target.id = 100;
+    target.x = 200.0f;
+    target.y = 100.0f;
+    target.width = 34.0f;
+    target.height = 52.0f;
+    target.health = 100;
+    targets.push_back(target);
+
+    sim::WeaponSystem weapons;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+
+    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, nullptr,
+                 doc.size.width);
+
+    CHECK(targets[0].health < 100);
+    CHECK(player.combat().ammo_for_current_weapon() == 49);
+}
+
+TEST_CASE("PlayerFired and EntityDamaged events on pistol fire", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.combat().facing_left = false;
+    player.combat().select_weapon(sim::WeaponId::Pistol);
+    give_ammo(player.combat(), sim::AmmoType::Bullets, 50);
+    REQUIRE(player.combat().has_ammo_for_weapon(sim::WeaponId::Pistol));
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget target;
+    target.id = 200;
+    target.x = 200.0f;
+    target.y = 100.0f;
+    target.width = 34.0f;
+    target.height = 52.0f;
+    targets.push_back(target);
+
+    d2df::EventBus bus;
+    int fired = 0;
+    int damaged = 0;
+    bus.subscribe<events::PlayerFired>([&](const events::PlayerFired&) { ++fired; });
+    bus.subscribe<events::EntityDamaged>([&](const events::EntityDamaged& e) {
+        if (e.target_id == 200) {
+            ++damaged;
+        }
+    });
+
+    sim::WeaponSystem weapons;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, &bus,
+                 doc.size.width);
+
+    CHECK(fired == 1);
+    CHECK(damaged == 1);
+}
+
+TEST_CASE("shotgun hitscan damages shootable target", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.combat().facing_left = false;
+    own_weapon(player.combat(), sim::WeaponId::Shotgun1);
+    player.combat().select_weapon(sim::WeaponId::Shotgun1);
+    give_ammo(player.combat(), sim::AmmoType::Shells, 20);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget target;
+    target.id = 101;
+    target.x = 200.0f;
+    target.y = 100.0f;
+    target.width = 34.0f;
+    target.height = 52.0f;
+    target.health = 100;
+    targets.push_back(target);
+
+    sim::WeaponSystem weapons;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+
+    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, nullptr,
+                 doc.size.width);
+
+    CHECK(targets[0].health < 100);
+}
+
+TEST_CASE("ACTIVATE_SHOT trigger opens door on hitscan line", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& door = doc.panels.back();
+    door.type = map::PANEL_CLOSEDOOR;
+    door.position = {300, 100};
+    door.size = {32, 64};
+    door.enabled = true;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& shot = doc.triggers.back();
+    shot.type = map::TriggerType::OpenDoor;
+    shot.target_panel = 0;
+    shot.position = {250, 120};
+    shot.size = {32, 32};
+    shot.enabled = true;
+    shot.activate = map::ActivateType::Shot;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    sim::MapCollision collision;
+    collision.build_from_panels(triggers.panels());
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.combat().facing_left = false;
+    player.combat().select_weapon(sim::WeaponId::Pistol);
+    give_ammo(player.combat(), sim::AmmoType::Bullets, 50);
+    REQUIRE(player.combat().has_ammo_for_weapon(sim::WeaponId::Pistol));
+
+    sim::WeaponSystem weapons;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+    std::vector<sim::ShootableTarget> no_targets;
+
+    weapons.tick(player, collision, fire_input, no_targets, &triggers, nullptr, 1, nullptr,
+                 doc.size.width);
+
+    CHECK_FALSE(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("rocket projectile stops at wall panel", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {200, 100};
+    wall.size = {32, 64};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::ProjectileSystem projectiles;
+    projectiles.spawn_rocket(120.0f, 116.0f, 400.0f, 116.0f, 1);
+
+    sim::PlayerState player;
+    std::vector<sim::ShootableTarget> no_targets;
+    float max_x_seen = 0.0f;
+    for (int i = 0; i < 40; ++i) {
+        for (const auto& projectile : projectiles.projectiles()) {
+            if (projectile.active) {
+                max_x_seen = std::max(max_x_seen, projectile.x);
+            }
+        }
+        projectiles.tick(collision, nullptr, player, no_targets, nullptr, doc.size.width,
+                         doc.size.height);
+    }
+
+    const bool rocket_gone =
+        projectiles.projectiles().empty() || !projectiles.projectiles()[0].active;
+    CHECK(rocket_gone);
+    CHECK(max_x_seen < 200.0f);
+}
+
+TEST_CASE("BFG charge spawns projectile after warmup", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    own_weapon(player.combat(), sim::WeaponId::Bfg);
+    player.combat().select_weapon(sim::WeaponId::Bfg);
+    player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Cells)] = 80;
+
+    sim::ProjectileSystem projectiles;
+    sim::WeaponSystem weapons;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+    std::vector<sim::ShootableTarget> no_targets;
+
+    weapons.tick(player, collision, fire_input, no_targets, nullptr, &projectiles, 1, nullptr,
+                 doc.size.width);
+    CHECK(player.combat().bfg_charge_ticks == 17);
+    CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Cells)] == 40);
+    CHECK(projectiles.projectiles().empty());
+
+    sim::PlayerInput idle{};
+    for (int i = 0; i < 18; ++i) {
+        weapons.tick(player, collision, idle, no_targets, nullptr, &projectiles, 1, nullptr,
+                     doc.size.width);
+    }
+
+    bool bfg_active = false;
+    for (const auto& projectile : projectiles.projectiles()) {
+        if (projectile.active && projectile.weapon == sim::WeaponId::Bfg) {
+            bfg_active = true;
+        }
+    }
+    CHECK(bfg_active);
+    CHECK(player.combat().bfg_charge_ticks == -1);
+}
+
+TEST_CASE("super chaingun hitscan damages shootable target", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.combat().facing_left = false;
+    own_weapon(player.combat(), sim::WeaponId::SuperChaingun);
+    player.combat().select_weapon(sim::WeaponId::SuperChaingun);
+    give_ammo(player.combat(), sim::AmmoType::Shells, 10);
+
+    std::vector<sim::ShootableTarget> targets;
+    targets.push_back(sim::ShootableTarget{101, 200.0f, 108.0f, 32.0f, 32.0f, 100});
+
+    sim::WeaponSystem weapons;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+
+    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, nullptr,
+                 doc.size.width);
+
+    CHECK(targets[0].health < 100);
+    CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Shells)] == 9);
+}
+
+TEST_CASE("medkit pickup restores player health", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem medkit;
+    medkit.position = {100, 100};
+    medkit.type = map::ItemType::MedkitSmall;
+    doc.items.push_back(medkit);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.apply_damage(30);
+
+    items.tick(player, nullptr);
+
+    CHECK(player.health() == 80);
+    CHECK_FALSE(items.items()[0].active);
+}
+
+TEST_CASE("ammo pickup increases combat ammo", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem shells;
+    shells.position = {100, 100};
+    shells.type = map::ItemType::AmmoShells;
+    doc.items.push_back(shells);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr);
+
+    CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Shells)] == 4);
+    CHECK_FALSE(items.items()[0].active);
 }

@@ -6,6 +6,7 @@
 #include <d2df/core/game_events.hpp>
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/trigger_types.hpp>
+#include <d2df/sim/combat_common.hpp>
 #include <spdlog/spdlog.h>
 
 namespace d2df::sim {
@@ -45,11 +46,6 @@ bool panels_touch(const map::MapPanel& a, const map::MapPanel& b) {
     const float by1 = static_cast<float>(b.position.y + b.size.height);
 
     return ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0;
-}
-
-bool rects_overlap(float ax, float ay, float aw, float ah, float bx, float by, float bw,
-                   float bh) {
-    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
 }
 
 bool has_flag(map::ActivateType flags, map::ActivateType flag) {
@@ -623,6 +619,121 @@ map::MapDocument TriggerSystem::map_view(const map::MapDocument& base) const {
     map::MapDocument view = base;
     view.panels = panels_;
     return view;
+}
+
+void TriggerSystem::press_shot_line(float x1, float y1, float x2, float y2, PlayerState& player,
+                                    EventBus* events) {
+    for (std::size_t i = 0; i < triggers_.size(); ++i) {
+        if (trigger_timeout_[i] > 0) {
+            continue;
+        }
+
+        const auto& trigger = triggers_[i];
+        if (!trigger.enabled || trigger.type == map::TriggerType::None) {
+            continue;
+        }
+        if (!has_flag(trigger.activate, map::ActivateType::Shot)) {
+            continue;
+        }
+
+        const float tx = static_cast<float>(trigger.position.x);
+        const float ty = static_cast<float>(trigger.position.y);
+        const float tw = static_cast<float>(trigger.size.width);
+        const float th = static_cast<float>(trigger.size.height);
+        if (!segment_intersects_aabb(x1, y1, x2, y2, tx, ty, tw, th)) {
+            continue;
+        }
+
+        activate_trigger(i, player, events);
+    }
+}
+
+void TriggerSystem::press_shot_rect(float x, float y, float width, float height,
+                                   PlayerState& player, EventBus* events) {
+    for (std::size_t i = 0; i < triggers_.size(); ++i) {
+        if (trigger_timeout_[i] > 0) {
+            continue;
+        }
+
+        const auto& trigger = triggers_[i];
+        if (!trigger.enabled || trigger.type == map::TriggerType::None) {
+            continue;
+        }
+        if (!has_flag(trigger.activate, map::ActivateType::Shot)) {
+            continue;
+        }
+
+        const float tx = static_cast<float>(trigger.position.x);
+        const float ty = static_cast<float>(trigger.position.y);
+        const float tw = static_cast<float>(trigger.size.width);
+        const float th = static_cast<float>(trigger.size.height);
+        if (!rects_overlap(x, y, width, height, tx, ty, tw, th)) {
+            continue;
+        }
+
+        activate_trigger(i, player, events);
+    }
+}
+
+void TriggerSystem::press_shot_circle(float cx, float cy, float radius, PlayerState& player,
+                                      EventBus* events) {
+    if (radius <= 0.0f) {
+        return;
+    }
+
+    const float radius_sq = radius * radius;
+    const float box_x = cx - radius;
+    const float box_y = cy - radius;
+    const float box_w = radius * 2.0f;
+    const float box_h = radius * 2.0f;
+
+    for (std::size_t i = 0; i < triggers_.size(); ++i) {
+        if (trigger_timeout_[i] > 0) {
+            continue;
+        }
+
+        const auto& trigger = triggers_[i];
+        if (!trigger.enabled || trigger.type == map::TriggerType::None) {
+            continue;
+        }
+        if (!has_flag(trigger.activate, map::ActivateType::Shot)) {
+            continue;
+        }
+
+        const float tx = static_cast<float>(trigger.position.x);
+        const float ty = static_cast<float>(trigger.position.y);
+        const float tw = static_cast<float>(trigger.size.width);
+        const float th = static_cast<float>(trigger.size.height);
+        if (!rects_overlap(box_x, box_y, box_w, box_h, tx, ty, tw, th)) {
+            continue;
+        }
+
+        const float corners[4][2] = {{tx, ty},
+                                     {tx + tw, ty},
+                                     {tx + tw, ty + th},
+                                     {tx, ty + th}};
+        bool near_corner = false;
+        for (const auto& corner : corners) {
+            const float dx = cx - corner[0];
+            const float dy = cy - corner[1];
+            if (dx * dx + dy * dy < radius_sq) {
+                near_corner = true;
+                break;
+            }
+        }
+
+        if (!near_corner) {
+            const float closest_x = std::clamp(cx, tx, tx + tw);
+            const float closest_y = std::clamp(cy, ty, ty + th);
+            const float dx = cx - closest_x;
+            const float dy = cy - closest_y;
+            if (dx * dx + dy * dy >= radius_sq) {
+                continue;
+            }
+        }
+
+        activate_trigger(i, player, events);
+    }
 }
 
 } // namespace d2df::sim

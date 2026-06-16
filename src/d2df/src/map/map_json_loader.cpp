@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 #include <d2df/map/area_types.hpp>
+#include <d2df/map/item_types.hpp>
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/trigger_types.hpp>
 
@@ -501,6 +502,50 @@ std::vector<MapTrigger> parse_triggers(std::string_view json) {
     return triggers;
 }
 
+std::vector<MapItem> parse_items(std::string_view json) {
+    std::vector<MapItem> items;
+    const auto marker = "\"items\":";
+    const auto start = json.find(marker);
+    if (start == std::string_view::npos) {
+        return items;
+    }
+
+    const auto array_start = json.find('[', start);
+    if (array_start == std::string_view::npos) {
+        return items;
+    }
+
+    const auto array_end = find_matching_bracket(json, array_start);
+    if (!array_end) {
+        return items;
+    }
+
+    const auto array = json.substr(array_start, *array_end - array_start + 1);
+    for (std::size_t i = 0; i < array.size();) {
+        const auto obj_start = array.find('{', i);
+        if (obj_start == std::string_view::npos) {
+            break;
+        }
+
+        const auto obj_end = find_matching_brace(array, obj_start);
+        if (!obj_end) {
+            break;
+        }
+
+        const auto object = array.substr(obj_start, *obj_end - obj_start + 1);
+        MapItem item;
+        item.position = parse_point(object, "position");
+        item.type = item_type_from_name(json_extract_string(object, "type").value_or(""));
+        item.only_dm = object.find("ITEM_OPTION_ONLYDM") != std::string_view::npos;
+        item.fall = object.find("ITEM_OPTION_FALL") != std::string_view::npos;
+        if (item.type != ItemType::None) {
+            items.push_back(std::move(item));
+        }
+        i = *obj_end + 1;
+    }
+    return items;
+}
+
 } // namespace
 
 MapDocument load_map_json_v1(const std::filesystem::path& path) {
@@ -527,6 +572,7 @@ MapDocument load_map_json_v1(const std::filesystem::path& path) {
     document.panels = parse_panels(json);
     document.areas = parse_areas(json);
     document.triggers = parse_triggers(json);
+    document.items = parse_items(json);
 
     if (document.version != 1) {
         throw std::runtime_error("Unsupported map JSON version in " + path.string());

@@ -50,6 +50,7 @@ d2df_set_warnings(d2df_resources)
 
 add_library(d2df_map STATIC
     src/map/area_types.cpp
+    src/map/item_types.cpp
     src/map/map_catalog.cpp
     src/map/map_json_loader.cpp
     src/map/map_spawn.cpp
@@ -73,10 +74,16 @@ d2df_set_warnings(d2df_map)
 
 add_library(d2df_sim STATIC
     src/ecs/game_world.cpp
+    src/sim/combat_common.cpp
+    src/sim/item_system.cpp
     src/sim/map_collision.cpp
     src/sim/player_state.cpp
     src/sim/lift_system.cpp
+    src/sim/projectile_system.cpp
+    src/sim/shootable_target.cpp
     src/sim/trigger_system.cpp
+    src/sim/weapon_system.cpp
+    src/sim/weapon_types.cpp
 )
 
 add_library(d2df::sim ALIAS d2df_sim)

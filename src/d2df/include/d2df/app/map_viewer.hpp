@@ -13,6 +13,7 @@
 #include <d2df/resources/asset_database.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/trigger_system.hpp>
+#include <d2df/sim/weapon_types.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -44,6 +45,9 @@ private:
     void fixed_update();
     void draw_sky(int viewport_w, int viewport_h);
     void draw_player(int viewport_w, int viewport_h);
+    void draw_targets(int viewport_w, int viewport_h);
+    void draw_items(int viewport_w, int viewport_h);
+    void draw_projectiles(int viewport_w, int viewport_h);
     void draw_hud(int viewport_w, int viewport_h);
     void update_camera_follow();
 
@@ -68,6 +72,10 @@ private:
     bool key_jump_ = false;
     bool key_use_ = false;
     bool key_use_edge_ = false;
+    bool key_aim_up_ = false;
+    bool key_aim_down_ = false;
+    bool key_weapon_prev_ = false;
+    int weapon_select_request_ = -1;
     float camera_move_speed_ = 480.0f;
     EventBus* events_ = nullptr;
 };

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <d2df/sim/weapon_types.hpp>
+
 namespace d2df::sim {
 
 class MapCollision;
@@ -8,6 +10,13 @@ struct PlayerInput {
     bool left = false;
     bool right = false;
     bool jump = false;
+    bool aim_up = false;
+    bool aim_down = false;
+    bool fire = false;
+    bool weapon_prev = false;
+    bool weapon_next = false;
+    /// -1 = no direct selection this tick; otherwise WeaponId index.
+    int weapon_select_request = -1;
 };
 
 /// Player hitbox matches legacy PLAYER_RECT (34x52 at spawn point).
@@ -52,8 +61,15 @@ struct PlayerState {
     bool apply_damage(int amount);
 
     void restore_health();
+    /// Raise health up to cap; returns false if already at or above cap.
+    bool add_health(int amount, int max_health);
+    void set_health(int value);
+
+    [[nodiscard]] PlayerCombat& combat() { return combat_; }
+    [[nodiscard]] const PlayerCombat& combat() const { return combat_; }
 
 private:
+    void update_facing(bool left, bool right);
     void apply_run(bool left, bool right);
     void try_jump(const MapCollision& collision);
     static int z_dec(int value, int amount);
@@ -64,6 +80,7 @@ private:
     bool in_water_ = false;
     bool in_acid_ = false;
     bool on_lift_ = false;
+    PlayerCombat combat_;
 };
 
 } // namespace d2df::sim

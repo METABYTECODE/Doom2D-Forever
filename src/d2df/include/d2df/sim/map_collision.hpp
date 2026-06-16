@@ -15,6 +15,13 @@ inline constexpr std::uint16_t MOVE_INWATER = 16;
 inline constexpr std::uint16_t MOVE_HITWATER = 32;
 inline constexpr std::uint16_t MOVE_HITAIR = 64;
 
+struct RayHit {
+    bool hit = false;
+    float x = 0.0f;
+    float y = 0.0f;
+    float distance_sq = 0.0f;
+};
+
 class MapCollision {
 public:
     void build_from_map(const map::MapDocument& map);
@@ -38,9 +45,15 @@ public:
     [[nodiscard]] std::uint16_t move_object(float& x, float& y, float width, float height, int dx,
                                             int dy, bool climb_slopes) const;
 
+    /// Ray trace against solid panels (walls + closed doors). Distance along segment [0,1].
+    [[nodiscard]] RayHit trace_solid_ray(float x0, float y0, float x1, float y1) const;
+
     [[nodiscard]] const std::vector<map::MapPanel>& panels() const { return panels_; }
 
 private:
+    [[nodiscard]] bool segment_intersects_aabb(float x0, float y0, float x1, float y1, float bx,
+                                               float by, float bw, float bh, float& hit_x,
+                                               float& hit_y, float& hit_t) const;
     [[nodiscard]] bool stay_on_step(float x, float y, float width, float height) const;
     [[nodiscard]] bool can_move_y(float x, float y, float width, float height, int ystep) const;
     [[nodiscard]] bool move_axis_x(float& xtemp, float& ytemp, float width, float height, int xstep,

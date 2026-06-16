@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <d2df/map/area_types.hpp>
+#include <d2df/map/item_types.hpp>
 #include <d2df/map/trigger_types.hpp>
 
 namespace d2df::map {
@@ -55,6 +56,13 @@ struct MapTrigger {
     bool d2d = false;
 };
 
+struct MapItem {
+    MapPoint position;
+    ItemType type = ItemType::None;
+    bool only_dm = false;
+    bool fall = false;
+};
+
 struct MapDocument {
     int version = 0;
     std::string id;
@@ -68,6 +76,7 @@ struct MapDocument {
     std::vector<MapPanel> panels;
     std::vector<MapArea> areas;
     std::vector<MapTrigger> triggers;
+    std::vector<MapItem> items;
 };
 
 } // namespace d2df::map

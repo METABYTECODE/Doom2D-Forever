@@ -2,6 +2,7 @@
 
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
+#include <d2df/ecs/components/network_identity.hpp>
 #include <d2df/map/map_spawn.hpp>
 
 namespace d2df::ecs {
@@ -12,8 +13,10 @@ void publish_damage(EventBus* events, int amount, events::DamageSource source, i
         return;
     }
     events->publish(events::PlayerDamaged{amount, source, health_remaining});
+    events->publish(events::EntityDamaged{kPlayerEntityId, 0, amount, source, health_remaining});
     if (health_remaining <= 0) {
         events->publish(events::PlayerDied{source});
+        events->publish(events::EntityDied{kPlayerEntityId, source});
     }
 }
 
@@ -25,6 +28,8 @@ void GameWorld::reset_player(const map::MapDocument& map) {
         registry_.emplace<PlayerTag>(player_entity_);
         registry_.emplace<Transform>(player_entity_);
         registry_.emplace<Velocity>(player_entity_);
+        auto& identity = registry_.emplace<NetworkIdentity>(player_entity_);
+        identity.net_id = kPlayerEntityId;
     }
 
     spawn_point_ = map::find_player_spawn(map);
@@ -35,7 +40,28 @@ void GameWorld::reset_player(const map::MapDocument& map) {
                         static_cast<float>(map.size.height) * 0.5f);
     }
 
+    targets_.clear();
+    projectiles_.clear();
+    items_.reset(map);
+    spawn_debug_target(map);
+
     sync_to_ecs();
+}
+
+void GameWorld::spawn_debug_target(const map::MapDocument& map) {
+    sim::ShootableTarget target;
+    target.id = kDebugTargetBaseId;
+    target.width = sim::PlayerState::width;
+    target.height = sim::PlayerState::height;
+    target.max_health = 100;
+    target.health = target.max_health;
+
+    const float base_x = spawn_point_ ? static_cast<float>(spawn_point_->x) : map.size.width * 0.5f;
+    const float base_y = spawn_point_ ? static_cast<float>(spawn_point_->y) : map.size.height * 0.5f;
+    target.x = base_x + 120.0f;
+    target.y = base_y;
+
+    targets_.push_back(target);
 }
 
 void GameWorld::respawn_player() {
@@ -44,11 +70,13 @@ void GameWorld::respawn_player() {
     } else {
         player_.restore_health();
     }
+    projectiles_.clear();
     sync_to_ecs();
 }
 
 void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInput input,
-                             EventBus* events) {
+                             EventBus* events, int map_width, int map_height,
+                             sim::TriggerSystem* triggers) {
     if (!player_.alive()) {
         return;
     }
@@ -63,6 +91,13 @@ void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInpu
     publish_liquid_events(was_water, was_acid, events);
     apply_environment_damage(collision, events);
 
+    weapons_.tick(player_, collision, input, targets_, triggers, &projectiles_, kPlayerEntityId,
+                  events, map_width);
+
+    projectiles_.tick(collision, triggers, player_, targets_, events, map_width, map_height);
+
+    items_.tick(player_, events);
+
     sync_to_ecs();
 }
 
@@ -71,7 +106,8 @@ void GameWorld::apply_environment_damage(const sim::MapCollision& collision, Eve
         return;
     }
 
-    const int acid_damage = collision.acid_damage(player_.x, player_.y, player_.width, player_.height);
+    const int acid_damage =
+        collision.acid_damage(player_.x, player_.y, player_.width, player_.height);
     if (acid_damage <= 0) {
         return;
     }

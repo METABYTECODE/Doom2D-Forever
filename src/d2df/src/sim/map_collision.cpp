@@ -306,4 +306,97 @@ std::uint16_t MapCollision::move_object(float& x, float& y, float width, float h
     return state;
 }
 
+bool MapCollision::segment_intersects_aabb(float x0, float y0, float x1, float y1, float bx,
+                                             float by, float bw, float bh, float& hit_x,
+                                             float& hit_y, float& hit_t) const {
+    const float dx = x1 - x0;
+    const float dy = y1 - y0;
+    float t0 = 0.0f;
+    float t1 = 1.0f;
+
+    const auto clip = [&](float p, float q) -> bool {
+        if (p == 0.0f) {
+            return q >= 0.0f;
+        }
+        const float r = q / p;
+        if (p < 0.0f) {
+            if (r > t1) {
+                return false;
+            }
+            if (r > t0) {
+                t0 = r;
+            }
+        } else {
+            if (r < t0) {
+                return false;
+            }
+            if (r < t1) {
+                t1 = r;
+            }
+        }
+        return true;
+    };
+
+    if (!clip(-dx, x0 - bx)) {
+        return false;
+    }
+    if (!clip(dx, bx + bw - x0)) {
+        return false;
+    }
+    if (!clip(-dy, y0 - by)) {
+        return false;
+    }
+    if (!clip(dy, by + bh - y0)) {
+        return false;
+    }
+
+    if (t0 > t1) {
+        return false;
+    }
+
+    hit_t = t0;
+    hit_x = x0 + dx * t0;
+    hit_y = y0 + dy * t0;
+    return true;
+}
+
+RayHit MapCollision::trace_solid_ray(float x0, float y0, float x1, float y1) const {
+    RayHit best;
+    const float rdx = x1 - x0;
+    const float rdy = y1 - y0;
+    const float ray_len_sq = rdx * rdx + rdy * rdy;
+    if (ray_len_sq <= 0.0f) {
+        return best;
+    }
+
+    for (std::size_t i = 0; i < panels_.size(); ++i) {
+        const auto& panel = panels_[i];
+        if (!is_solid_panel(panel, i)) {
+            continue;
+        }
+
+        float hit_x = 0.0f;
+        float hit_y = 0.0f;
+        float hit_t = 0.0f;
+        const float bx = static_cast<float>(panel.position.x);
+        const float by = static_cast<float>(panel.position.y);
+        const float bw = static_cast<float>(panel.size.width);
+        const float bh = static_cast<float>(panel.size.height);
+
+        if (!segment_intersects_aabb(x0, y0, x1, y1, bx, by, bw, bh, hit_x, hit_y, hit_t)) {
+            continue;
+        }
+
+        const float dist_sq = hit_t * hit_t * ray_len_sq;
+        if (!best.hit || dist_sq < best.distance_sq) {
+            best.hit = true;
+            best.x = hit_x;
+            best.y = hit_y;
+            best.distance_sq = dist_sq;
+        }
+    }
+
+    return best;
+}
+
 } // namespace d2df::sim

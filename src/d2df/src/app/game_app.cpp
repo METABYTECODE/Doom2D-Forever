@@ -175,7 +175,7 @@ void GameApp::process_frame() {
 
 int GameApp::run() {
     init_logging();
-    spdlog::info("Doom2D Forever — Phase 4 (player physics)");
+    spdlog::info("Doom2D Forever — Phase 5 (combat MVP)");
 
     if (!init_sdl()) {
         return 1;
