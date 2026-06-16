@@ -1,0 +1,19 @@
+# Build
+/build/
+/out/
+/cmake-build-*/
+
+# IDE
+/.vs/
+/.vscode/
+*.user
+*.suo
+
+# Generated
+compile_commands.json
+
+# Asset pipeline intermediates (regenerate with d2df-extract)
+/assets/staging/
+
+# vcpkg (if installed locally)
+/vcpkg_installed/

@@ -1,0 +1,54 @@
+#pragma once
+
+namespace d2df::sim {
+
+class MapCollision;
+
+struct PlayerInput {
+    bool left = false;
+    bool right = false;
+    bool jump = false;
+};
+
+/// Player hitbox matches legacy PLAYER_RECT (34x52 at spawn point).
+struct PlayerState {
+    float x = 0.0f;
+    float y = 0.0f;
+    float prev_x = 0.0f;
+    float prev_y = 0.0f;
+
+    int vel_x = 0;
+    int vel_y = 0;
+    int accel_x = 0;
+    int accel_y = 0;
+
+    static constexpr float width = 34.0f;
+    static constexpr float height = 52.0f;
+
+    static constexpr int kMaxRunVel = 8;
+    static constexpr int kMaxYVel = 30;
+    static constexpr int kVelJump = 10;
+    static constexpr int kVelSwim = 4;
+
+    void snap_to(float spawn_x, float spawn_y);
+    void begin_tick();
+    void fixed_update(const MapCollision& collision, PlayerInput input);
+
+    [[nodiscard]] bool on_ground() const { return on_ground_; }
+    [[nodiscard]] bool in_water() const { return in_water_; }
+    [[nodiscard]] bool on_lift() const { return on_lift_; }
+    [[nodiscard]] float render_x(float alpha) const;
+    [[nodiscard]] float render_y(float alpha) const;
+
+private:
+    void apply_run(bool left, bool right);
+    void try_jump(const MapCollision& collision);
+    static int z_dec(int value, int amount);
+
+    int tick_ = 0;
+    bool on_ground_ = false;
+    bool in_water_ = false;
+    bool on_lift_ = false;
+};
+
+} // namespace d2df::sim

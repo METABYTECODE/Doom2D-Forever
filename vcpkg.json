@@ -1,0 +1,14 @@
+{
+  "name": "doom2d-forever",
+  "version-string": "0.1.0",
+  "description": "Modern C++ rewrite of Doom2D Forever",
+  "dependencies": [
+    "sdl2",
+    "sdl2-ttf",
+    "entt",
+    "spdlog",
+    "fmt",
+    "catch2",
+    "zlib"
+  ]
+}

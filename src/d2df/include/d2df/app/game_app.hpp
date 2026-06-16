@@ -1,0 +1,59 @@
+#pragma once
+
+#include <chrono>
+#include <filesystem>
+#include <memory>
+#include <string>
+
+struct SDL_Window;
+struct SDL_Renderer;
+
+namespace d2df {
+
+class EventBus;
+class MapViewer;
+class ServiceRegistry;
+
+struct GameAppConfig {
+    std::string window_title = "Doom2D Forever";
+    int window_width = 1280;
+    int window_height = 720;
+    bool vsync = true;
+    std::filesystem::path content_root = "assets/content";
+    std::filesystem::path map_path = "assets/content/maps/doom2d/map01.json";
+};
+
+class GameApp {
+public:
+    explicit GameApp(GameAppConfig config = {});
+    ~GameApp();
+
+    GameApp(const GameApp&) = delete;
+    GameApp& operator=(const GameApp&) = delete;
+
+    [[nodiscard]] ServiceRegistry& services() { return *services_; }
+    [[nodiscard]] EventBus& events() { return *events_; }
+
+    int run();
+
+private:
+    bool init_sdl();
+    void shutdown_sdl();
+    void register_core_services();
+    bool resolve_asset_paths();
+    bool init_map_viewer();
+    void process_frame();
+
+    GameAppConfig config_;
+    SDL_Window* window_ = nullptr;
+    SDL_Renderer* renderer_ = nullptr;
+
+    std::unique_ptr<ServiceRegistry> services_;
+    std::unique_ptr<EventBus> events_;
+    std::unique_ptr<MapViewer> map_viewer_;
+
+    bool running_ = false;
+    std::chrono::steady_clock::time_point last_tick_;
+};
+
+} // namespace d2df

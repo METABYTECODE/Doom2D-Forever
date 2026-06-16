@@ -1,0 +1,6 @@
+add_subdirectory(lib)
+add_subdirectory(d2df_wad_ls)
+add_subdirectory(d2df_extract)
+add_subdirectory(d2df_organize)
+add_subdirectory(d2df_map_import)
+add_subdirectory(d2df_content_validate)
