@@ -14,6 +14,7 @@
 #include <d2df/render/texture_cache.hpp>
 #include <d2df/resources/asset_database.hpp>
 #include <d2df/sim/map_collision.hpp>
+#include <d2df/sim/effect_types.hpp>
 #include <d2df/sim/trigger_system.hpp>
 #include <d2df/sim/weapon_types.hpp>
 
@@ -27,6 +28,14 @@ struct SDL_Renderer;
 namespace d2df {
 
 class EventBus;
+
+struct WorldEffect {
+    sim::ExplosionSprite sprite{};
+    float x = 0.0f;
+    float y = 0.0f;
+    int anim_tick = 0;
+    int duration_ticks = 0;
+};
 
 class MapViewer {
 public:
@@ -48,8 +57,11 @@ private:
     void draw_sky(int viewport_w, int viewport_h);
     void draw_player(int viewport_w, int viewport_h);
     void draw_targets(int viewport_w, int viewport_h);
-    void draw_items(int viewport_w, int viewport_h);
+    void draw_items(int viewport_w, int viewport_h, bool monster_drops_only = false);
     void draw_projectiles(int viewport_w, int viewport_h);
+    void draw_effects(int viewport_w, int viewport_h);
+    void tick_effects();
+    void spawn_explosion_effect(const events::WorldExplosion& event);
     void draw_hud(int viewport_w, int viewport_h);
     void update_camera_follow(float render_alpha = 1.0f);
 
@@ -81,6 +93,7 @@ private:
     float camera_move_speed_ = 480.0f;
     EventBus* events_ = nullptr;
     audio::SoundSystem sound_;
+    std::vector<WorldEffect> effects_;
 };
 
 } // namespace d2df

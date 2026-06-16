@@ -76,10 +76,18 @@ enum class ExplosionKind : std::uint8_t {
     Rocket = 0,
     Plasma = 1,
     Bfg = 2,
+    ImpFire = 3,
+    CacoFire = 4,
+    BaronFire = 5,
+    BspFire = 6,
+    SkelFire = 7,
+    MancubFire = 8,
 };
 
 struct WorldExplosion {
     ExplosionKind kind = ExplosionKind::Rocket;
+    float x = 0.f;
+    float y = 0.f;
 };
 
 struct ItemPickedUp {
@@ -114,6 +122,13 @@ struct WorldSwitchActivated {
 
 struct MonsterAlerted {
     EntityId entity_id = 0;
+    std::uint8_t monster_type = 0;
+    float x = 0.f;
+    float y = 0.f;
+};
+
+struct MonsterFired {
+    EntityId shooter_id = 0;
     std::uint8_t monster_type = 0;
     float x = 0.f;
     float y = 0.f;

@@ -13,6 +13,16 @@ namespace {
 constexpr int kHealthSoftCap = 100;
 constexpr int kHealthLimit = 200;
 
+int z_dec(int value, int amount) {
+    if (value > 0) {
+        return std::max(0, value - amount);
+    }
+    if (value < 0) {
+        return std::min(0, value + amount);
+    }
+    return 0;
+}
+
 void inc_max(int& value, int amount, int max_value) {
     value = std::min(value + amount, max_value);
 }
@@ -367,6 +377,11 @@ void tick_falling_item(WorldItem& item, const MapCollision& collision) {
     if ((state & MOVE_HITWALL) != 0) {
         item.vel_x = 0;
     }
+
+    // Legacy g_items.pas: air resistance on horizontal drift every other tick.
+    if ((item.anim_tick % 2) == 0) {
+        item.vel_x = z_dec(item.vel_x, 1);
+    }
 }
 
 } // namespace
@@ -388,6 +403,7 @@ void ItemSystem::spawn_monster_drop(map::ItemType type, float center_x, float ce
     item.height = dims.height;
     item.fall = true;
     item.respawnable = false;
+    item.dropped = true;
     item.vel_x = vel_x;
     item.vel_y = vel_y;
     item.active = true;

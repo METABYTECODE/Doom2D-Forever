@@ -34,6 +34,7 @@ struct WorldItem {
     bool active = true;
     bool respawnable = false;
     bool fall = false;
+    bool dropped = false;
     int vel_x = 0;
     int vel_y = 0;
     int anim_tick = 0;

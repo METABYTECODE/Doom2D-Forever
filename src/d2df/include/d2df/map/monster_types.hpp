@@ -68,6 +68,7 @@ struct MonsterSpritePlacement {
 [[nodiscard]] MonsterDimensions monster_stats(MonsterType type);
 [[nodiscard]] MonsterHitbox monster_hitbox(MonsterType type);
 [[nodiscard]] MonsterSprite monster_sprite(MonsterType type, bool facing_left);
+[[nodiscard]] MonsterSprite monster_sleep_sprite(MonsterType type, bool facing_left);
 [[nodiscard]] MonsterSprite monster_corpse_sprite(MonsterType type, bool facing_left);
 [[nodiscard]] MonsterSpritePlacement monster_sprite_placement(MonsterType type, float hitbox_x,
                                                               float hitbox_y, float hitbox_width,
@@ -77,6 +78,7 @@ struct MonsterSpritePlacement {
 [[nodiscard]] bool monster_vanishes_on_death(MonsterType type);
 [[nodiscard]] bool monster_can_shoot(MonsterType type);
 [[nodiscard]] bool monster_can_be_revived(MonsterType type);
+[[nodiscard]] const char* monster_attack_sfx(MonsterType type);
 [[nodiscard]] int monster_shoot_cooldown_ticks(MonsterType type);
 [[nodiscard]] const char* monster_die_sfx(MonsterType type);
 [[nodiscard]] const char* monster_alert_sfx(MonsterType type, EntityId entity_id);

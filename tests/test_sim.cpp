@@ -26,6 +26,7 @@
 #include <d2df/sim/monster_system.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
+#include <d2df/sim/effect_types.hpp>
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/shootable_target.hpp>
 #include <d2df/sim/trigger_system.hpp>
@@ -42,6 +43,26 @@ void give_ammo(sim::PlayerCombat& combat, sim::AmmoType type, int amount) {
 
 void own_weapon(sim::PlayerCombat& combat, sim::WeaponId weapon) {
     combat.owned[static_cast<std::size_t>(weapon)] = true;
+}
+
+void tick_projectiles_until_idle(sim::ProjectileSystem& projectiles,
+                                 const sim::MapCollision& collision, sim::PlayerState& player,
+                                 std::vector<sim::ShootableTarget>& targets, int map_width,
+                                 int map_height, d2df::EventBus* events = nullptr,
+                                 int max_ticks = 200) {
+    for (int i = 0; i < max_ticks; ++i) {
+        bool any_active = false;
+        for (const auto& projectile : projectiles.projectiles()) {
+            if (projectile.active) {
+                any_active = true;
+                break;
+            }
+        }
+        if (!any_active) {
+            break;
+        }
+        projectiles.tick(collision, nullptr, player, targets, events, map_width, map_height);
+    }
 }
 
 } // namespace
@@ -820,7 +841,7 @@ TEST_CASE("MapCollision trace_solid_ray hits wall panel", "[sim][combat]") {
     CHECK(hit.x >= 199.0f);
 }
 
-TEST_CASE("pistol hitscan damages shootable target", "[sim][combat]") {
+TEST_CASE("pistol projectile damages shootable target", "[sim][combat]") {
     map::MapDocument doc;
     doc.size = {512, 512};
 
@@ -845,11 +866,20 @@ TEST_CASE("pistol hitscan damages shootable target", "[sim][combat]") {
     targets.push_back(target);
 
     sim::WeaponSystem weapons;
+    sim::ProjectileSystem projectiles;
     sim::PlayerInput fire_input{};
     fire_input.fire = true;
 
-    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, nullptr,
+    weapons.tick(player, collision, fire_input, targets, nullptr, &projectiles, 1, nullptr,
                  doc.size.width);
+    REQUIRE(std::any_of(projectiles.projectiles().begin(), projectiles.projectiles().end(),
+                        [](const sim::Projectile& projectile) {
+                            return projectile.active &&
+                                   projectile.kind == sim::ProjectileKind::Bullet;
+                        }));
+
+    tick_projectiles_until_idle(projectiles, collision, player, targets, doc.size.width,
+                                doc.size.height);
 
     CHECK(targets[0].health < 100);
     CHECK(player.combat().ammo_for_current_weapon() == 49);
@@ -889,16 +919,19 @@ TEST_CASE("PlayerFired and EntityDamaged events on pistol fire", "[sim][combat]"
     });
 
     sim::WeaponSystem weapons;
+    sim::ProjectileSystem projectiles;
     sim::PlayerInput fire_input{};
     fire_input.fire = true;
-    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, &bus,
+    weapons.tick(player, collision, fire_input, targets, nullptr, &projectiles, 1, &bus,
                  doc.size.width);
+    tick_projectiles_until_idle(projectiles, collision, player, targets, doc.size.width,
+                                doc.size.height, &bus);
 
     CHECK(fired == 1);
     CHECK(damaged == 1);
 }
 
-TEST_CASE("shotgun hitscan damages shootable target", "[sim][combat]") {
+TEST_CASE("shotgun projectiles damage shootable target", "[sim][combat]") {
     map::MapDocument doc;
     doc.size = {512, 512};
 
@@ -923,16 +956,19 @@ TEST_CASE("shotgun hitscan damages shootable target", "[sim][combat]") {
     targets.push_back(target);
 
     sim::WeaponSystem weapons;
+    sim::ProjectileSystem projectiles;
     sim::PlayerInput fire_input{};
     fire_input.fire = true;
 
-    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, nullptr,
+    weapons.tick(player, collision, fire_input, targets, nullptr, &projectiles, 1, nullptr,
                  doc.size.width);
+    tick_projectiles_until_idle(projectiles, collision, player, targets, doc.size.width,
+                                doc.size.height);
 
     CHECK(targets[0].health < 100);
 }
 
-TEST_CASE("ACTIVATE_SHOT trigger opens door on hitscan line", "[sim][combat]") {
+TEST_CASE("ACTIVATE_SHOT trigger opens door on projectile path", "[sim][combat]") {
     map::MapDocument doc;
     doc.size = {512, 512};
 
@@ -966,12 +1002,20 @@ TEST_CASE("ACTIVATE_SHOT trigger opens door on hitscan line", "[sim][combat]") {
     REQUIRE(player.combat().has_ammo_for_weapon(sim::WeaponId::Pistol));
 
     sim::WeaponSystem weapons;
+    sim::ProjectileSystem projectiles;
     sim::PlayerInput fire_input{};
     fire_input.fire = true;
     std::vector<sim::ShootableTarget> no_targets;
 
-    weapons.tick(player, collision, fire_input, no_targets, &triggers, nullptr, 1, nullptr,
+    weapons.tick(player, collision, fire_input, no_targets, &triggers, &projectiles, 1, nullptr,
                  doc.size.width);
+    for (int i = 0; i < 120; ++i) {
+        projectiles.tick(collision, &triggers, player, no_targets, nullptr, doc.size.width,
+                         doc.size.height);
+        if (!triggers.panels()[0].enabled) {
+            break;
+        }
+    }
 
     CHECK_FALSE(triggers.panels()[0].enabled);
 }
@@ -1043,7 +1087,7 @@ TEST_CASE("BFG charge spawns projectile after warmup", "[sim][combat]") {
 
     bool bfg_active = false;
     for (const auto& projectile : projectiles.projectiles()) {
-        if (projectile.active && projectile.weapon == sim::WeaponId::Bfg) {
+        if (projectile.active && projectile.kind == sim::ProjectileKind::Bfg) {
             bfg_active = true;
         }
     }
@@ -1051,7 +1095,7 @@ TEST_CASE("BFG charge spawns projectile after warmup", "[sim][combat]") {
     CHECK(player.combat().bfg_charge_ticks == -1);
 }
 
-TEST_CASE("super chaingun hitscan damages shootable target", "[sim][combat]") {
+TEST_CASE("super chaingun projectiles damage shootable target", "[sim][combat]") {
     map::MapDocument doc;
     doc.size = {512, 512};
 
@@ -1070,11 +1114,14 @@ TEST_CASE("super chaingun hitscan damages shootable target", "[sim][combat]") {
                                            108.0f, 32.0f, 32.0f, 0, 0, 100, 100, 0, false});
 
     sim::WeaponSystem weapons;
+    sim::ProjectileSystem projectiles;
     sim::PlayerInput fire_input{};
     fire_input.fire = true;
 
-    weapons.tick(player, collision, fire_input, targets, nullptr, nullptr, 1, nullptr,
+    weapons.tick(player, collision, fire_input, targets, nullptr, &projectiles, 1, nullptr,
                  doc.size.width);
+    tick_projectiles_until_idle(projectiles, collision, player, targets, doc.size.width,
+                                doc.size.height);
 
     CHECK(targets[0].health < 100);
     CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Shells)] == 9);
@@ -1371,6 +1418,30 @@ TEST_CASE("falling item moves downward with gravity", "[sim][items]") {
         items.tick(player, &collision, nullptr);
     }
     CHECK(items.items()[0].y > start_y);
+}
+
+TEST_CASE("falling item horizontal velocity decays", "[sim][items]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 120};
+    floor.size = {256, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::ItemSystem items;
+    items.spawn_monster_drop(map::ItemType::WeaponShotgun1, 128.0f, 80.0f, 9, 0);
+
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+
+    for (int i = 0; i < 120; ++i) {
+        items.tick(player, &collision, nullptr);
+    }
+
+    CHECK(items.items()[0].vel_x == 0);
 }
 
 TEST_CASE("map monsters load from JSON", "[sim][monsters]") {
@@ -1859,6 +1930,104 @@ TEST_CASE("imp shoots player at range with line of sight", "[sim][monsters]") {
     CHECK(player.health() < health_before);
 }
 
+TEST_CASE("zomby shoots bullet projectile at player", "[sim][monsters]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 300};
+    floor.size = {512, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(320.0f, 220.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.x = 80.0f;
+    zomby.y = 220.0f;
+    zomby.prev_x = zomby.x;
+    zomby.prev_y = zomby.y;
+    zomby.width = 34.0f;
+    zomby.height = 52.0f;
+    zomby.max_health = 15;
+    zomby.health = 15;
+    zomby.facing_left = false;
+    zomby.is_awake = true;
+    zomby.aggro_player = true;
+    targets.push_back(zomby);
+
+    sim::MonsterSystem monsters;
+    sim::ProjectileSystem projectiles;
+    sim::TriggerSystem triggers;
+    bool spawned_bullet = false;
+    for (int i = 0; i < 180; ++i) {
+        monsters.tick(collision, player, targets, nullptr, &projectiles);
+        projectiles.tick(collision, &triggers, player, targets, nullptr, 512, 512);
+        if (std::any_of(projectiles.projectiles().begin(), projectiles.projectiles().end(),
+                        [](const sim::Projectile& projectile) {
+                            return projectile.active &&
+                                   projectile.kind == sim::ProjectileKind::Bullet &&
+                                   projectile.shooter_id == 200;
+                        })) {
+            spawned_bullet = true;
+            break;
+        }
+    }
+    CHECK(spawned_bullet);
+}
+
+TEST_CASE("plasma projectile publishes explosion event on wall hit", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& wall = doc.panels.back();
+    wall.type = map::PANEL_WALL;
+    wall.position = {200, 100};
+    wall.size = {32, 32};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ProjectileSystem projectiles;
+    projectiles.spawn_plasma(120.0f, 116.0f, 400.0f, 116.0f, 1);
+
+    d2df::EventBus bus;
+    int explosions = 0;
+    float explosion_x = 0.0f;
+    bus.subscribe<events::WorldExplosion>([&](const events::WorldExplosion& event) {
+        ++explosions;
+        explosion_x = event.x;
+        CHECK(event.kind == events::ExplosionKind::Plasma);
+    });
+
+    for (int i = 0; i < 80; ++i) {
+        projectiles.tick(collision, nullptr, player, targets, &bus, doc.size.width,
+                         doc.size.height);
+    }
+
+    CHECK(explosions == 1);
+    CHECK(explosion_x > 150.0f);
+    CHECK(explosion_x < 210.0f);
+}
+
+TEST_CASE("explosion kind mapping matches projectile types", "[sim][combat]") {
+    CHECK(sim::explosion_kind_for_projectile(sim::ProjectileKind::Plasma) ==
+          events::ExplosionKind::Plasma);
+    CHECK(sim::explosion_kind_for_projectile(sim::ProjectileKind::ImpFire) ==
+          events::ExplosionKind::ImpFire);
+    CHECK_FALSE(sim::explosion_kind_for_projectile(sim::ProjectileKind::Bullet).has_value());
+    CHECK(std::string_view(sim::explosion_sfx(events::ExplosionKind::ImpFire)) ==
+          "sfx.world.explodeball");
+}
+
 TEST_CASE("barrel explosion damages nearby player", "[sim][monsters]") {
     ecs::GameWorld world;
     map::MapDocument doc;
@@ -2126,6 +2295,14 @@ TEST_CASE("Monster sprite placement uses legacy hitbox and draw offsets", "[sim]
 
     const auto caco_sprite = map::monster_sprite(map::MonsterType::Caco, false);
     CHECK(caco_sprite.frame_count == 1);
+}
+
+TEST_CASE("sleeping monsters use dedicated sleep sprites", "[sim][monsters]") {
+    const auto sleep = map::monster_sleep_sprite(map::MonsterType::Zomby, false);
+    CHECK(std::string_view(sleep.texture_id) == "tex.monster.zomby_sleep");
+
+    const auto awake = map::monster_sprite(map::MonsterType::Zomby, false);
+    CHECK(std::string_view(awake.texture_id) == "tex.monster.zomby_go");
 }
 
 TEST_CASE("OpenDoor trigger publishes door open event", "[sim][audio]") {

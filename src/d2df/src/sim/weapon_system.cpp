@@ -16,31 +16,6 @@ constexpr float kWeaponPointLeftX = 16.0f;
 constexpr float kWeaponPointRightX = 47.0f;
 constexpr float kWeaponPointY = 32.0f;
 
-// Deterministic shotgun spread offsets (legacy uses random ±8).
-constexpr int kShotgunSpread[][2] = {
-    {0, 0}, {4, -3}, {-3, 2}, {2, 5}, {-5, -2}, {6, 1}, {-2, -6}, {3, 4}, {-4, 3}, {1, -5},
-    {-1, 6}, {5, -4}, {-6, 0}, {2, -7}, {7, 2}, {-3, -5}, {4, 6}, {-5, 1}, {0, -8}, {6, -3},
-};
-
-void fire_melee_box(std::vector<ShootableTarget>& targets, EntityId shooter_id, EventBus* events,
-                    float box_x, float box_y, float box_width, float box_height, int damage,
-                    events::DamageSource source) {
-    for (auto& target : targets) {
-        if (!target.alive()) {
-            continue;
-        }
-        if (!rects_overlap(box_x, box_y, box_width, box_height, target.x, target.y, target.width,
-                           target.height)) {
-            continue;
-        }
-        const int health_before = target.health;
-        target.apply_damage(damage, shooter_id);
-        publish_entity_damage(events, target.id, shooter_id, health_before - target.health, source,
-                              target.health);
-        return;
-    }
-}
-
 void compute_muzzle(const PlayerState& player, const PlayerCombat& combat, float& wx, float& wy,
                     float& xd, float& yd, int aim_vertical) {
     const float weapon_x = combat.facing_left ? kWeaponPointLeftX : kWeaponPointRightX;
@@ -60,6 +35,18 @@ float aim_vertical_offset(const PlayerInput& input) {
     return 0.0f;
 }
 
+void fire_shot_trigger(TriggerSystem* triggers, PlayerState& player, EventBus* events,
+                       const MapCollision& collision, float x0, float y0, float x1, float y1) {
+    if (triggers == nullptr) {
+        return;
+    }
+
+    const auto wall_hit = collision.trace_solid_ray(x0, y0, x1, y1);
+    const float hit_x = wall_hit.hit ? wall_hit.x : x1;
+    const float hit_y = wall_hit.hit ? wall_hit.y : y1;
+    triggers->press_shot_line(x0, y0, hit_x, hit_y, player, events);
+}
+
 } // namespace
 
 void WeaponSystem::compute_ray_end(float wx, float wy, float xd, float yd, int map_width,
@@ -77,50 +64,6 @@ void WeaponSystem::publish_player_fired(EventBus* events, EntityId shooter_id, W
     }
     events->publish(events::PlayerFired{shooter_id, static_cast<std::uint8_t>(weapon), ox, oy, ax,
                                         ay});
-}
-
-void WeaponSystem::fire_hitscan(PlayerState& player, const MapCollision& collision,
-                                std::vector<ShootableTarget>& targets, TriggerSystem* triggers,
-                                EntityId shooter_id, EventBus* events, float x0, float y0,
-                                float x1, float y1, int damage, WeaponId /*weapon*/,
-                                bool check_shot_trigger) {
-    if (x1 == x0 && y1 == y0) {
-        return;
-    }
-
-    const auto wall_hit = collision.trace_solid_ray(x0, y0, x1, y1);
-    const float wall_limit_sq =
-        wall_hit.hit ? wall_hit.distance_sq : (x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0);
-
-    float hit_x = x1;
-    float hit_y = y1;
-    if (wall_hit.hit) {
-        hit_x = wall_hit.x;
-        hit_y = wall_hit.y;
-    }
-
-    if (check_shot_trigger && triggers != nullptr) {
-        triggers->press_shot_line(x0, y0, hit_x, hit_y, player, events);
-    }
-
-    damage_targets_along_ray(targets, x0, y0, x1, y1, wall_limit_sq, damage, shooter_id, events,
-                             events::DamageSource::Weapon);
-}
-
-void WeaponSystem::fire_shotgun(PlayerState& player, const MapCollision& collision,
-                                std::vector<ShootableTarget>& targets, TriggerSystem* triggers,
-                                EntityId shooter_id, EventBus* events, float wx, float wy,
-                                float ray_x2, float ray_y2, int pellet_count, WeaponId weapon) {
-    const int count = std::min(pellet_count, static_cast<int>(sizeof(kShotgunSpread) /
-                                                              sizeof(kShotgunSpread[0])));
-    for (int i = 0; i < count; ++i) {
-        const float ox = wx + static_cast<float>(kShotgunSpread[i][0]);
-        const float oy = wy + static_cast<float>(kShotgunSpread[i][1]);
-        const float ax = ray_x2 + static_cast<float>(kShotgunSpread[i][0]);
-        const float ay = ray_y2 + static_cast<float>(kShotgunSpread[i][1]);
-        fire_hitscan(player, collision, targets, triggers, shooter_id, events, ox, oy, ax, ay, 3,
-                     weapon, i == 0);
-    }
 }
 
 void WeaponSystem::fire_melee(PlayerState& player, std::vector<ShootableTarget>& targets,
@@ -190,46 +133,59 @@ void WeaponSystem::try_fire(PlayerState& player, const MapCollision& collision,
         break;
 
     case WeaponId::Pistol: {
+        if (projectiles == nullptr) {
+            return;
+        }
         const auto ammo_type = weapon_ammo_type(WeaponId::Pistol);
         combat.ammo[static_cast<std::size_t>(ammo_type)] -= 1;
         combat.reloading[static_cast<std::size_t>(WeaponId::Pistol)] =
             weapon_reload_ticks(WeaponId::Pistol);
         publish_player_fired(events, shooter_id, WeaponId::Pistol, wx, wy, ray_x2, ray_y2);
-        fire_hitscan(player, collision, targets, triggers, shooter_id, events, wx, wy, ray_x2,
-                     ray_y2, 3, WeaponId::Pistol, true);
+        fire_shot_trigger(triggers, player, events, collision, wx, wy, ray_x2, ray_y2);
+        projectiles->spawn_bullet(wx, wy, ray_x2, ray_y2, shooter_id);
         break;
     }
 
     case WeaponId::Shotgun1: {
+        if (projectiles == nullptr) {
+            return;
+        }
         const auto ammo_type = weapon_ammo_type(WeaponId::Shotgun1);
         combat.ammo[static_cast<std::size_t>(ammo_type)] -= 1;
         combat.reloading[static_cast<std::size_t>(WeaponId::Shotgun1)] =
             weapon_reload_ticks(WeaponId::Shotgun1);
         publish_player_fired(events, shooter_id, WeaponId::Shotgun1, wx, wy, ray_x2, ray_y2);
-        fire_shotgun(player, collision, targets, triggers, shooter_id, events, wx, wy, ray_x2,
-                     ray_y2, 10, WeaponId::Shotgun1);
+        fire_shot_trigger(triggers, player, events, collision, wx, wy, ray_x2, ray_y2);
+        projectiles->spawn_shotgun_pellets(wx, wy, ray_x2, ray_y2, shooter_id, 10);
         break;
     }
 
     case WeaponId::Shotgun2: {
+        if (projectiles == nullptr) {
+            return;
+        }
         const auto ammo_type = weapon_ammo_type(WeaponId::Shotgun2);
         combat.ammo[static_cast<std::size_t>(ammo_type)] -= 2;
         combat.reloading[static_cast<std::size_t>(WeaponId::Shotgun2)] =
             weapon_reload_ticks(WeaponId::Shotgun2);
         publish_player_fired(events, shooter_id, WeaponId::Shotgun2, wx, wy, ray_x2, ray_y2);
-        fire_shotgun(player, collision, targets, triggers, shooter_id, events, wx, wy, ray_x2,
-                     ray_y2, 20, WeaponId::Shotgun2);
+        fire_shot_trigger(triggers, player, events, collision, wx, wy, ray_x2, ray_y2);
+        projectiles->spawn_shotgun_pellets(wx, wy, ray_x2, ray_y2, shooter_id, 20,
+                                           3, WeaponId::Shotgun2);
         break;
     }
 
     case WeaponId::Chaingun: {
+        if (projectiles == nullptr) {
+            return;
+        }
         const auto ammo_type = weapon_ammo_type(WeaponId::Chaingun);
         combat.ammo[static_cast<std::size_t>(ammo_type)] -= 1;
         combat.reloading[static_cast<std::size_t>(WeaponId::Chaingun)] =
             weapon_reload_ticks(WeaponId::Chaingun);
         publish_player_fired(events, shooter_id, WeaponId::Chaingun, wx, wy, ray_x2, ray_y2);
-        fire_hitscan(player, collision, targets, triggers, shooter_id, events, wx, wy, ray_x2,
-                     ray_y2, 3, WeaponId::Chaingun, true);
+        fire_shot_trigger(triggers, player, events, collision, wx, wy, ray_x2, ray_y2);
+        projectiles->spawn_bullet(wx, wy, ray_x2, ray_y2, shooter_id, 3, WeaponId::Chaingun);
         break;
     }
 
@@ -260,15 +216,18 @@ void WeaponSystem::try_fire(PlayerState& player, const MapCollision& collision,
     }
 
     case WeaponId::Flamethrower: {
+        if (projectiles == nullptr) {
+            return;
+        }
         const auto ammo_type = weapon_ammo_type(WeaponId::Flamethrower);
         combat.ammo[static_cast<std::size_t>(ammo_type)] -= 1;
         combat.reloading[static_cast<std::size_t>(WeaponId::Flamethrower)] =
             weapon_reload_ticks(WeaponId::Flamethrower);
         publish_player_fired(events, shooter_id, WeaponId::Flamethrower, wx, wy, ray_x2, ray_y2);
-        const float flame_x =
-            combat.facing_left ? player.x - 40.0f : player.x + player.width - 8.0f;
-        fire_melee_box(targets, shooter_id, events, flame_x, player.y + 8.0f, 48.0f, 40.0f, 3,
-                       events::DamageSource::Weapon);
+        fire_shot_trigger(triggers, player, events, collision, wx, wy, ray_x2, ray_y2);
+        projectiles->spawn_flame(wx, wy, ray_x2, ray_y2, shooter_id);
+        projectiles->spawn_flame(wx, wy - 6.0f, ray_x2, ray_y2 - 6.0f, shooter_id);
+        projectiles->spawn_flame(wx, wy + 6.0f, ray_x2, ray_y2 + 6.0f, shooter_id);
         break;
     }
 
@@ -288,13 +247,17 @@ void WeaponSystem::try_fire(PlayerState& player, const MapCollision& collision,
     }
 
     case WeaponId::SuperChaingun: {
+        if (projectiles == nullptr) {
+            return;
+        }
         const auto ammo_type = weapon_ammo_type(WeaponId::SuperChaingun);
         combat.ammo[static_cast<std::size_t>(ammo_type)] -= 1;
         combat.reloading[static_cast<std::size_t>(WeaponId::SuperChaingun)] =
             weapon_reload_ticks(WeaponId::SuperChaingun);
         publish_player_fired(events, shooter_id, WeaponId::SuperChaingun, wx, wy, ray_x2, ray_y2);
-        fire_shotgun(player, collision, targets, triggers, shooter_id, events, wx, wy, ray_x2,
-                     ray_y2, 10, WeaponId::SuperChaingun);
+        fire_shot_trigger(triggers, player, events, collision, wx, wy, ray_x2, ray_y2);
+        projectiles->spawn_shotgun_pellets(wx, wy, ray_x2, ray_y2, shooter_id, 10, 3,
+                                           WeaponId::SuperChaingun);
         break;
     }
 

@@ -83,6 +83,8 @@ add_library(d2df_sim STATIC
     src/sim/player_state.cpp
     src/sim/lift_system.cpp
     src/sim/projectile_system.cpp
+    src/sim/projectile_types.cpp
+    src/sim/effect_types.cpp
     src/sim/shootable_target.cpp
     src/sim/trigger_system.cpp
     src/sim/weapon_system.cpp

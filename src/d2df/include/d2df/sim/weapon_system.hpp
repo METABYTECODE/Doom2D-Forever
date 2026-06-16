@@ -34,16 +34,6 @@ private:
     void compute_ray_end(float wx, float wy, float xd, float yd, int map_width, float& ray_x2,
                          float& ray_y2) const;
 
-    void fire_hitscan(PlayerState& player, const MapCollision& collision,
-                      std::vector<ShootableTarget>& targets, TriggerSystem* triggers,
-                      EntityId shooter_id, EventBus* events, float x0, float y0, float x1,
-                      float y1, int damage, WeaponId weapon, bool check_shot_trigger);
-
-    void fire_shotgun(PlayerState& player, const MapCollision& collision,
-                      std::vector<ShootableTarget>& targets, TriggerSystem* triggers,
-                      EntityId shooter_id, EventBus* events, float wx, float wy, float ray_x2,
-                      float ray_y2, int pellet_count, WeaponId weapon);
-
     void fire_melee(PlayerState& player, std::vector<ShootableTarget>& targets, EntityId shooter_id,
                     EventBus* events, float box_width, float box_height, int damage,
                     events::DamageSource source);

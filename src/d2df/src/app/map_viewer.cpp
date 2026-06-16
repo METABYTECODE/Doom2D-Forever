@@ -14,6 +14,9 @@
 #include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/monster_types.hpp>
 #include <d2df/sim/item_system.hpp>
+#include <d2df/sim/effect_types.hpp>
+#include <d2df/sim/projectile_system.hpp>
+#include <d2df/sim/projectile_types.hpp>
 #include <d2df/sim/weapon_types.hpp>
 
 namespace d2df {
@@ -127,6 +130,12 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                     sound_.play(sfx);
                 }
             });
+            events_->subscribe<events::MonsterFired>([this](const events::MonsterFired& event) {
+                const auto type = static_cast<map::MonsterType>(event.monster_type);
+                if (const char* sfx = map::monster_attack_sfx(type)) {
+                    sound_.play(sfx);
+                }
+            });
             events_->subscribe<events::WorldDoorChanged>(
                 [this](const events::WorldDoorChanged& event) {
                     switch (event.sound) {
@@ -145,18 +154,10 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                     sound_.play("sfx.world.switch0");
                 });
             events_->subscribe<events::WorldExplosion>([this](const events::WorldExplosion& event) {
-                switch (event.kind) {
-                case events::ExplosionKind::Bfg:
-                    sound_.play("sfx.world.explodebfg");
-                    break;
-                case events::ExplosionKind::Plasma:
-                    sound_.play("sfx.world.explodeplasma");
-                    break;
-                case events::ExplosionKind::Rocket:
-                default:
-                    sound_.play("sfx.world.exploderocket");
-                    break;
+                if (const char* sfx = sim::explosion_sfx(event.kind)) {
+                    sound_.play(sfx);
                 }
+                spawn_explosion_effect(event);
             });
             events_->subscribe<events::PlayerDamaged>([this](const events::PlayerDamaged& event) {
                 if (event.amount <= 0) {
@@ -187,6 +188,8 @@ void MapViewer::load_map(const std::filesystem::path& map_path) {
     free_camera_ = false;
 
     map_index_ = find_map_index(map_list_, map_path);
+
+    effects_.clear();
 
     spdlog::info("Map [{}/{}]: {} ({}x{}, {} panels, {} areas)", map_index_ + 1,
                  map_list_.size(), map_.name, map_.size.width, map_.size.height, map_.panels.size(),
@@ -433,6 +436,8 @@ void MapViewer::fixed_update() {
         }
         cycle_map(1);
     }
+
+    tick_effects();
 }
 
 void MapViewer::update_camera_follow(float render_alpha) {
@@ -528,9 +533,61 @@ void MapViewer::draw_projectiles(int viewport_w, int viewport_h) {
             continue;
         }
 
+        const auto sprite = sim::projectile_sprite(projectile.kind);
         const float alpha = fixed_timestep_.render_alpha();
-        const float px = projectile.prev_x + (projectile.x - projectile.prev_x) * alpha;
-        const float py = projectile.prev_y + (projectile.y - projectile.prev_y) * alpha;
+        const float px = projectile.prev_x + (projectile.x - projectile.prev_x) * alpha +
+                         sprite.draw_offset_x;
+        const float py = projectile.prev_y + (projectile.y - projectile.prev_y) * alpha +
+                         sprite.draw_offset_y;
+
+        SDL_Texture* texture =
+            sprite.texture_id != nullptr ? textures_->get(sprite.texture_id) : nullptr;
+
+        if (texture != nullptr) {
+            int tex_w = 0;
+            int tex_h = 0;
+            SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+            if (tex_w > 0 && tex_h > 0) {
+                const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
+                const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
+                const int frames_in_texture = frame_w > 0 ? std::max(1, tex_w / frame_w) : 1;
+                const int frame_count = std::min(sprite.frame_count, frames_in_texture);
+
+                int frame_index = 0;
+                if (frame_count > 1 && sprite.anim_period > 0) {
+                    frame_index = (projectile.anim_tick / sprite.anim_period) % frame_count;
+                }
+
+                int dst_x = 0;
+                int dst_y = 0;
+                int dst_w = 0;
+                int dst_h = 0;
+                camera_.world_rect_to_screen(px, py, static_cast<float>(frame_w),
+                                             static_cast<float>(frame_h), viewport_w, viewport_h,
+                                             dst_x, dst_y, dst_w, dst_h);
+
+                if (dst_w > 0 && dst_h > 0) {
+                    SDL_SetTextureAlphaMod(texture, 255);
+                    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+                    const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
+                    const SDL_Rect dst{dst_x, dst_y, dst_w, dst_h};
+
+                    if (sprite.rotate_to_velocity &&
+                        (projectile.vel_x != 0 || projectile.vel_y != 0)) {
+                        const double angle =
+                            -std::atan2(static_cast<double>(projectile.vel_y),
+                                        static_cast<double>(projectile.vel_x)) *
+                            180.0 / M_PI;
+                        const SDL_Point center{dst_w / 2, dst_h / 2};
+                        SDL_RenderCopyEx(renderer_, texture, &src, &dst, angle, &center,
+                                         SDL_FLIP_NONE);
+                    } else {
+                        SDL_RenderCopy(renderer_, texture, &src, &dst);
+                    }
+                    continue;
+                }
+            }
+        }
 
         int dst_x = 0;
         int dst_y = 0;
@@ -539,19 +596,35 @@ void MapViewer::draw_projectiles(int viewport_w, int viewport_h) {
         camera_.world_rect_to_screen(px, py, projectile.width, projectile.height, viewport_w,
                                      viewport_h, dst_x, dst_y, dst_w, dst_h);
 
-        if (projectile.weapon == sim::WeaponId::Plasma) {
+        if (projectile.kind == sim::ProjectileKind::Plasma) {
             SDL_SetRenderDrawColor(renderer_, 80, 200, 255, 240);
-        } else if (projectile.weapon == sim::WeaponId::Bfg) {
-            SDL_SetRenderDrawColor(renderer_, 80, 255, 80, 240);
-        } else {
+        } else if (projectile.kind == sim::ProjectileKind::Rocket ||
+                   projectile.kind == sim::ProjectileKind::SkelFire) {
             SDL_SetRenderDrawColor(renderer_, 255, 140, 40, 240);
+        } else if (projectile.kind == sim::ProjectileKind::Bfg) {
+            SDL_SetRenderDrawColor(renderer_, 80, 255, 80, 240);
+        } else if (projectile.kind == sim::ProjectileKind::ImpFire) {
+            SDL_SetRenderDrawColor(renderer_, 255, 200, 80, 240);
+        } else if (projectile.kind == sim::ProjectileKind::CacoFire) {
+            SDL_SetRenderDrawColor(renderer_, 255, 80, 160, 240);
+        } else if (projectile.kind == sim::ProjectileKind::BaronFire ||
+                   projectile.kind == sim::ProjectileKind::MancubFire) {
+            SDL_SetRenderDrawColor(renderer_, 180, 80, 255, 240);
+        } else if (projectile.kind == sim::ProjectileKind::BspFire) {
+            SDL_SetRenderDrawColor(renderer_, 120, 220, 255, 240);
+        } else if (projectile.kind == sim::ProjectileKind::Flame) {
+            SDL_SetRenderDrawColor(renderer_, 255, 120, 40, 220);
+        } else if (projectile.kind == sim::ProjectileKind::ShotgunPellet) {
+            SDL_SetRenderDrawColor(renderer_, 255, 220, 120, 240);
+        } else {
+            SDL_SetRenderDrawColor(renderer_, 255, 255, 200, 240);
         }
         const SDL_Rect rect{dst_x, dst_y, dst_w, dst_h};
         SDL_RenderFillRect(renderer_, &rect);
     }
 }
 
-void MapViewer::draw_items(int viewport_w, int viewport_h) {
+void MapViewer::draw_items(int viewport_w, int viewport_h, bool monster_drops_only) {
     if (free_camera_) {
         return;
     }
@@ -559,6 +632,9 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
     SDL_Texture* respawn_texture = textures_->get("tex.ui.itemrespawn");
 
     for (const auto& item : world_.items().items()) {
+        if (item.dropped != monster_drops_only) {
+            continue;
+        }
         if (!item.active && item.respawn_anim_tick <= 0) {
             continue;
         }
@@ -697,6 +773,8 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
         if (target.is_monster()) {
             if (target.is_corpse() || target.is_reviving()) {
                 sprite = map::monster_corpse_sprite(target.monster_type, target.facing_left);
+            } else if (!target.is_awake) {
+                sprite = map::monster_sleep_sprite(target.monster_type, target.facing_left);
             } else {
                 sprite = map::monster_sprite(target.monster_type, target.facing_left);
             }
@@ -776,6 +854,82 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
     }
 }
 
+void MapViewer::spawn_explosion_effect(const events::WorldExplosion& event) {
+    const auto sprite = sim::explosion_sprite(event.kind);
+    if (sprite.texture_id == nullptr || sprite.frame_count <= 0 || sprite.anim_period <= 0) {
+        return;
+    }
+
+    WorldEffect effect;
+    effect.sprite = sprite;
+    effect.x = event.x + sprite.draw_offset_x;
+    effect.y = event.y + sprite.draw_offset_y;
+    effect.duration_ticks = sprite.frame_count * sprite.anim_period;
+    effects_.push_back(effect);
+}
+
+void MapViewer::tick_effects() {
+    for (auto& effect : effects_) {
+        ++effect.anim_tick;
+    }
+
+    effects_.erase(std::remove_if(effects_.begin(), effects_.end(),
+                                  [](const WorldEffect& effect) {
+                                      return effect.anim_tick >= effect.duration_ticks;
+                                  }),
+                    effects_.end());
+}
+
+void MapViewer::draw_effects(int viewport_w, int viewport_h) {
+    if (free_camera_) {
+        return;
+    }
+
+    for (const auto& effect : effects_) {
+        if (effect.sprite.texture_id == nullptr || textures_ == nullptr) {
+            continue;
+        }
+
+        SDL_Texture* texture = textures_->get(effect.sprite.texture_id);
+        if (texture == nullptr) {
+            continue;
+        }
+
+        int tex_w = 0;
+        int tex_h = 0;
+        SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+        if (tex_w <= 0 || tex_h <= 0) {
+            continue;
+        }
+
+        const int frame_w = effect.sprite.frame_width > 0 ? effect.sprite.frame_width : tex_w;
+        const int frame_h = effect.sprite.frame_height > 0 ? effect.sprite.frame_height : tex_h;
+        const int frames_in_texture = frame_w > 0 ? std::max(1, tex_w / frame_w) : 1;
+        const int frame_count = std::min(effect.sprite.frame_count, frames_in_texture);
+        const int frame_index =
+            frame_count > 1 && effect.sprite.anim_period > 0
+                ? (effect.anim_tick / effect.sprite.anim_period) % frame_count
+                : 0;
+
+        int dst_x = 0;
+        int dst_y = 0;
+        int dst_w = 0;
+        int dst_h = 0;
+        camera_.world_rect_to_screen(effect.x, effect.y, static_cast<float>(frame_w),
+                                     static_cast<float>(frame_h), viewport_w, viewport_h, dst_x,
+                                     dst_y, dst_w, dst_h);
+        if (dst_w <= 0 || dst_h <= 0) {
+            continue;
+        }
+
+        SDL_SetTextureAlphaMod(texture, 255);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
+        const SDL_Rect dst{dst_x, dst_y, dst_w, dst_h};
+        SDL_RenderCopy(renderer_, texture, &src, &dst);
+    }
+}
+
 void MapViewer::draw_hud(int viewport_w, int viewport_h) {
     (void)viewport_w;
     const auto& player = world_.player();
@@ -836,10 +990,12 @@ void MapViewer::render(int viewport_w, int viewport_h) {
 
     draw_sky(viewport_w, viewport_h);
     map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, viewport_w, viewport_h);
-    draw_items(viewport_w, viewport_h);
+    draw_items(viewport_w, viewport_h, false);
     draw_player(viewport_w, viewport_h);
     draw_targets(viewport_w, viewport_h);
+    draw_items(viewport_w, viewport_h, true);
     draw_projectiles(viewport_w, viewport_h);
+    draw_effects(viewport_w, viewport_h);
     draw_hud(viewport_w, viewport_h);
 }
 

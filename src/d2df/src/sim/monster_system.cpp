@@ -296,7 +296,8 @@ void tick_ground_monster(ShootableTarget& monster, const MapCollision& collision
 }
 
 bool try_shoot_monster(ShootableTarget& monster, float player_center_x, float player_center_y,
-                       float dx, float dy, bool can_see, ProjectileSystem* projectiles) {
+                       float dx, float dy, bool can_see, ProjectileSystem* projectiles,
+                       EventBus* events) {
     if (projectiles == nullptr || !can_see || monster.shoot_cooldown > 0 ||
         !map::monster_can_shoot(monster.monster_type)) {
         return false;
@@ -312,8 +313,14 @@ bool try_shoot_monster(ShootableTarget& monster, float player_center_x, float pl
 
     const float muzzle_x = monster.x + monster.width * 0.5f;
     const float muzzle_y = monster.y + monster.height * 0.5f;
-    projectiles->spawn_monster_shot(muzzle_x, muzzle_y, player_center_x, player_center_y, monster.id);
+    projectiles->spawn_monster_attack(monster.monster_type, muzzle_x, muzzle_y, player_center_x,
+                                      player_center_y, monster.id);
     monster.shoot_cooldown = map::monster_shoot_cooldown_ticks(monster.monster_type);
+    if (events != nullptr) {
+        events->publish(events::MonsterFired{monster.id,
+                                             static_cast<std::uint8_t>(monster.monster_type),
+                                             muzzle_x, muzzle_y});
+    }
     return true;
 }
 
@@ -469,7 +476,8 @@ void tick_monster(ShootableTarget& monster, const MapCollision& collision, Playe
         return;
     }
 
-    if (try_shoot_monster(monster, player_center_x, player_center_y, dx, dy, can_see, projectiles)) {
+    if (try_shoot_monster(monster, player_center_x, player_center_y, dx, dy, can_see, projectiles,
+                          events)) {
         ++monster.anim_tick;
         return;
     }

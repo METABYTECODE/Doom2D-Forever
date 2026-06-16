@@ -257,6 +257,59 @@ MonsterSprite monster_sprite(MonsterType type, bool /*facing_left*/) {
     }
 }
 
+MonsterSprite monster_sleep_sprite(MonsterType type, bool /*facing_left*/) {
+    switch (type) {
+    case MonsterType::Zomby:
+        return make_sprite("tex.monster.zomby_sleep", 64, 64, 1, 0, 1.0f, -4.0f);
+    case MonsterType::Imp:
+        return make_sprite("tex.monster.imp_sleep", 64, 64, 1, 0, 8.0f, -4.0f);
+    case MonsterType::Demon:
+        return make_sprite("tex.monster.demon_sleep", 64, 64, 1, 0, 1.0f, 4.0f);
+    case MonsterType::Serg:
+        return make_sprite("tex.monster.serg_sleep", 64, 64, 1, 0, 0.0f, -4.0f);
+    case MonsterType::Soul:
+        return make_sprite("tex.monster.soul_sleep", 64, 64, 1, 0, 1.0f, -10.0f);
+    case MonsterType::Pain:
+        return make_sprite("tex.monster.pain_sleep", 128, 128, 1, 0, -1.0f, -3.0f);
+    case MonsterType::Caco:
+        return make_sprite("tex.monster.caco_sleep", 128, 128, 1, 0, 0.0f, -4.0f);
+    case MonsterType::Cgun:
+        return make_sprite("tex.monster.cgun_sleep", 64, 64, 1, 0, -1.0f, -2.0f,
+                           "tex.monster.cgun_sleep_l");
+    case MonsterType::Baron:
+        return make_sprite("tex.monster.baron_sleep", 128, 128, 1, 0, 2.0f, 0.0f,
+                           "tex.monster.baron_sleep_l", 2.0f, 0.0f, true);
+    case MonsterType::Knight:
+        return make_sprite("tex.monster.knight_sleep", 128, 128, 1, 0, 2.0f, 0.0f,
+                           "tex.monster.knight_sleep_l", 2.0f, 0.0f, true);
+    case MonsterType::Vile:
+        return make_sprite("tex.monster.vile_sleep", 128, 128, 1, 0, 5.0f, -21.0f,
+                           "tex.monster.vile_sleep_l", 5.0f, -21.0f, true);
+    case MonsterType::Barrel:
+        return make_sprite("tex.monster.barrel_sleep", 64, 64, 3, 5, 0.0f, -15.0f);
+    case MonsterType::Fish:
+        return make_sprite("tex.monster.fish_sleep", 32, 32, 1, 0, -1.0f, 0.0f);
+    case MonsterType::Cyber:
+        return make_sprite("tex.monster.cyber_sleep", 128, 128, 1, 0, 2.0f, -6.0f,
+                           "tex.monster.cyber_sleep_l", 3.0f, -3.0f, true);
+    case MonsterType::Spider:
+        return make_sprite("tex.monster.spider_sleep", 256, 128, 1, 0, -4.0f, -4.0f);
+    case MonsterType::Bsp:
+        return make_sprite("tex.monster.bsp_sleep", 128, 64, 1, 0, 0.0f, -1.0f);
+    case MonsterType::Mancub:
+        return make_sprite("tex.monster.mancub_sleep", 128, 128, 1, 0, -2.0f, -7.0f);
+    case MonsterType::Skel:
+        return make_sprite("tex.monster.skel_sleep", 128, 128, 1, 0, -1.0f, 4.0f,
+                           "tex.monster.skel_sleep_l", -1.0f, 4.0f, true);
+    case MonsterType::Robo:
+        return make_sprite("tex.monster.robo_sleep", 128, 128, 1, 0, 0.0f, 0.0f);
+    case MonsterType::Man:
+        return make_sprite("tex.monster.man_sleep", 64, 64, 1, 0, 0.0f, -4.0f);
+    default:
+        return monster_sprite(type, false);
+    }
+}
+
 MonsterSprite monster_corpse_sprite(MonsterType type, bool /*facing_left*/) {
     switch (type) {
     case MonsterType::Zomby:
@@ -441,6 +494,35 @@ const char* monster_alert_sfx(MonsterType type, EntityId entity_id) {
         return "sfx.monster.skel_alert";
     case MonsterType::Spider:
         return "sfx.monster.spider_alert";
+    default:
+        return nullptr;
+    }
+}
+
+const char* monster_attack_sfx(MonsterType type) {
+    switch (type) {
+    case MonsterType::Zomby:
+        return "sfx.world.firepistol";
+    case MonsterType::Serg:
+        return "sfx.world.fireshotgun";
+    case MonsterType::Man:
+        return "sfx.world.fireshotgun2";
+    case MonsterType::Cgun:
+    case MonsterType::Spider:
+        return "sfx.world.firecgun";
+    case MonsterType::Imp:
+    case MonsterType::Caco:
+    case MonsterType::Baron:
+    case MonsterType::Knight:
+    case MonsterType::Mancub:
+        return "sfx.world.fireball";
+    case MonsterType::Cyber:
+        return "sfx.world.firerocket";
+    case MonsterType::Skel:
+        return "sfx.world.firerev";
+    case MonsterType::Bsp:
+    case MonsterType::Robo:
+        return "sfx.world.fireplasma";
     default:
         return nullptr;
     }
