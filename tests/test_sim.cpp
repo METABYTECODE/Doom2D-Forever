@@ -1032,3 +1032,86 @@ TEST_CASE("ammo pickup increases combat ammo", "[sim][items]") {
     CHECK(player.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Shells)] == 4);
     CHECK_FALSE(items.items()[0].active);
 }
+
+TEST_CASE("armor pickup raises player armor", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem armor;
+    armor.position = {100, 100};
+    armor.type = map::ItemType::ArmorGreen;
+    doc.items.push_back(armor);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr);
+
+    CHECK(player.armor() == sim::PlayerState::kArmorSoftCap);
+    CHECK_FALSE(items.items()[0].active);
+}
+
+TEST_CASE("key pickup grants inventory key", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem key;
+    key.position = {100, 100};
+    key.type = map::ItemType::KeyRed;
+    doc.items.push_back(key);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr);
+
+    CHECK(player.has_key_red());
+    CHECK_FALSE(items.items()[0].active);
+}
+
+TEST_CASE("ammo item respawns after pickup in single player", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem shells;
+    shells.position = {100, 100};
+    shells.type = map::ItemType::AmmoShells;
+    doc.items.push_back(shells);
+
+    sim::ItemSystem items;
+    items.reset(doc, true);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    items.tick(player, nullptr);
+
+    CHECK_FALSE(items.items()[0].active);
+    CHECK(items.items()[0].respawnable);
+    CHECK(items.items()[0].respawn_countdown == sim::kDefaultItemRespawnTicks);
+
+    player.snap_to(0.0f, 0.0f);
+
+    for (int i = 0; i < sim::kDefaultItemRespawnTicks - 1; ++i) {
+        items.tick(player, nullptr);
+        CHECK_FALSE(items.items()[0].active);
+    }
+
+    items.tick(player, nullptr);
+    CHECK(items.items()[0].active);
+}
+
+TEST_CASE("armor absorbs damage before health", "[sim][items]") {
+    sim::PlayerState player;
+    player.snap_to(0.0f, 0.0f);
+    player.set_armor(50);
+
+    const bool died = player.apply_damage(30);
+    CHECK_FALSE(died);
+    CHECK(player.armor() == 20);
+    CHECK(player.health() == sim::PlayerState::kMaxHealth);
+
+    player.apply_damage(50);
+    CHECK(player.armor() == 0);
+    CHECK(player.health() == 70);
+}

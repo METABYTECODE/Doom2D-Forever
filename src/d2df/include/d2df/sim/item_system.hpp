@@ -14,6 +14,10 @@ class EventBus;
 
 namespace d2df::sim {
 
+constexpr int kGameTicksPerSecond = 36;
+constexpr int kDefaultItemRespawnSeconds = 60;
+constexpr int kDefaultItemRespawnTicks = kDefaultItemRespawnSeconds * kGameTicksPerSecond;
+
 struct WorldItem {
     map::ItemType type = map::ItemType::None;
     float x = 0.0f;
@@ -21,6 +25,8 @@ struct WorldItem {
     float width = 16.0f;
     float height = 16.0f;
     bool active = true;
+    bool respawnable = false;
+    int respawn_countdown = 0;
 };
 
 class ItemSystem {
@@ -33,6 +39,7 @@ public:
 
 private:
     std::vector<WorldItem> items_;
+    bool single_player_ = true;
 };
 
 } // namespace d2df::sim

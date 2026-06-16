@@ -87,6 +87,15 @@ ItemType item_type_from_name(std::string_view name) {
     if (name == "ITEM_AMMO_BACKPACK") {
         return ItemType::AmmoBackpack;
     }
+    if (name == "ITEM_KEY_RED") {
+        return ItemType::KeyRed;
+    }
+    if (name == "ITEM_KEY_GREEN") {
+        return ItemType::KeyGreen;
+    }
+    if (name == "ITEM_KEY_BLUE") {
+        return ItemType::KeyBlue;
+    }
     return ItemType::None;
 }
 
@@ -154,6 +163,104 @@ ItemDimensions item_dimensions(ItemType type) {
         return {32.0f, 24.0f};
     default:
         return {16.0f, 16.0f};
+    }
+}
+
+bool item_respawns_in_single_player(ItemType type) {
+    switch (type) {
+    case ItemType::MedkitSmall:
+    case ItemType::MedkitLarge:
+    case ItemType::MedkitBlack:
+    case ItemType::AmmoBullets:
+    case ItemType::AmmoBulletsBox:
+    case ItemType::AmmoShells:
+    case ItemType::AmmoShellsBox:
+    case ItemType::AmmoRocket:
+    case ItemType::AmmoRocketBox:
+    case ItemType::AmmoCell:
+    case ItemType::AmmoCellBig:
+    case ItemType::AmmoFuelcan:
+        return true;
+    default:
+        return false;
+    }
+}
+
+const char* item_texture_asset_id(ItemType type) {
+    return item_sprite(type).texture_id;
+}
+
+ItemSprite item_sprite(ItemType type) {
+    switch (type) {
+    case ItemType::MedkitSmall:
+        return {"tex.ui.med1", 0, 0};
+    case ItemType::MedkitLarge:
+        return {"tex.ui.med2", 0, 0};
+    case ItemType::MedkitBlack:
+        return {"tex.ui.bmed", 0, 0};
+    case ItemType::ArmorGreen:
+    case ItemType::ArmorBlue:
+        return {type == ItemType::ArmorGreen ? "tex.ui.armorgreen" : "tex.ui.armorblue", 32, 16};
+    case ItemType::SphereBlue:
+    case ItemType::SphereWhite:
+        return {type == ItemType::SphereBlue ? "tex.ui.sblue" : "tex.ui.swhite", 32, 32};
+    case ItemType::Invul:
+    case ItemType::Invis:
+        return {type == ItemType::Invul ? "tex.ui.invul" : "tex.ui.invis", 32, 32};
+    case ItemType::WeaponSaw:
+        return {"tex.ui.saw", 0, 0};
+    case ItemType::WeaponShotgun1:
+        return {"tex.ui.shotgun1", 0, 0};
+    case ItemType::WeaponShotgun2:
+        return {"tex.ui.shotgun2", 0, 0};
+    case ItemType::WeaponChaingun:
+        return {"tex.ui.mgun_2", 0, 0};
+    case ItemType::WeaponRocketLauncher:
+        return {"tex.ui.rlauncher", 0, 0};
+    case ItemType::WeaponPlasma:
+        return {"tex.ui.pgun", 0, 0};
+    case ItemType::WeaponBfg:
+        return {"tex.ui.bfg_2", 0, 0};
+    case ItemType::WeaponSuperChaingun:
+        return {"tex.ui.schaingun", 0, 0};
+    case ItemType::WeaponFlamethrower:
+        return {"tex.ui.flamethrower", 0, 0};
+    case ItemType::WeaponPistol:
+        return {"tex.ui.pistol", 0, 0};
+    case ItemType::AmmoBullets:
+        return {"tex.ui.clip", 0, 0};
+    case ItemType::AmmoBulletsBox:
+        return {"tex.ui.ammo", 0, 0};
+    case ItemType::AmmoShells:
+        return {"tex.ui.shell1_2", 0, 0};
+    case ItemType::AmmoShellsBox:
+        return {"tex.ui.shell2_2", 0, 0};
+    case ItemType::AmmoRocket:
+        return {"tex.ui.rocket", 0, 0};
+    case ItemType::AmmoRocketBox:
+        return {"tex.ui.rockets", 0, 0};
+    case ItemType::AmmoCell:
+        return {"tex.ui.cell", 0, 0};
+    case ItemType::AmmoCellBig:
+        return {"tex.ui.cell2", 0, 0};
+    case ItemType::AmmoFuelcan:
+        return {"tex.ui.fuelcan", 0, 0};
+    case ItemType::AmmoBackpack:
+        return {"tex.ui.bpack", 0, 0};
+    case ItemType::KeyRed:
+        return {"tex.ui.keyr", 0, 0};
+    case ItemType::KeyGreen:
+        return {"tex.ui.keyg", 0, 0};
+    case ItemType::KeyBlue:
+        return {"tex.ui.keyb", 0, 0};
+    case ItemType::Bottle:
+        return {"tex.ui.bottle", 16, 32};
+    case ItemType::Helmet:
+        return {"tex.ui.helmet", 16, 16};
+    case ItemType::Jetpack:
+        return {"tex.ui.jetpack", 32, 32};
+    default:
+        return {nullptr, 0, 0};
     }
 }
 

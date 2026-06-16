@@ -51,11 +51,39 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
         return player.add_health(100, kHealthLimit);
 
     case map::ItemType::SphereWhite:
-        if (player.health() >= kHealthLimit) {
+        if (player.health() >= kHealthLimit && player.armor() >= PlayerState::kArmorLimit) {
             return false;
         }
-        player.set_health(kHealthLimit);
+        if (player.health() < kHealthLimit) {
+            player.set_health(kHealthLimit);
+        }
+        if (player.armor() < PlayerState::kArmorLimit) {
+            player.set_armor(PlayerState::kArmorLimit);
+        }
         return true;
+
+    case map::ItemType::ArmorGreen:
+        if (player.armor() >= PlayerState::kArmorSoftCap) {
+            return false;
+        }
+        player.set_armor(PlayerState::kArmorSoftCap);
+        return true;
+
+    case map::ItemType::ArmorBlue:
+        if (player.armor() >= PlayerState::kArmorLimit) {
+            return false;
+        }
+        player.set_armor(PlayerState::kArmorLimit);
+        return true;
+
+    case map::ItemType::KeyRed:
+        return player.give_key_red();
+
+    case map::ItemType::KeyGreen:
+        return player.give_key_green();
+
+    case map::ItemType::KeyBlue:
+        return player.give_key_blue();
 
     case map::ItemType::WeaponKnuckles:
         return apply_weapon_pickup(combat, WeaponId::Knuckles, AmmoType::Bullets, 0, true);
@@ -197,6 +225,7 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
 } // namespace
 
 void ItemSystem::reset(const map::MapDocument& map, bool single_player) {
+    single_player_ = single_player;
     items_.clear();
     for (const auto& map_item : map.items) {
         if (map_item.type == map::ItemType::None) {
@@ -213,11 +242,21 @@ void ItemSystem::reset(const map::MapDocument& map, bool single_player) {
         const auto dims = map::item_dimensions(map_item.type);
         item.width = dims.width;
         item.height = dims.height;
+        item.respawnable = single_player && map::item_respawns_in_single_player(map_item.type);
         items_.push_back(item);
     }
 }
 
 void ItemSystem::tick(PlayerState& player, EventBus* events) {
+    for (auto& item : items_) {
+        if (!item.active && item.respawnable && item.respawn_countdown > 0) {
+            --item.respawn_countdown;
+            if (item.respawn_countdown == 0) {
+                item.active = true;
+            }
+        }
+    }
+
     if (!player.alive()) {
         return;
     }
@@ -236,7 +275,13 @@ void ItemSystem::tick(PlayerState& player, EventBus* events) {
             continue;
         }
 
-        item.active = false;
+        if (item.respawnable && single_player_) {
+            item.active = false;
+            item.respawn_countdown = kDefaultItemRespawnTicks;
+        } else {
+            item.active = false;
+        }
+
         if (events != nullptr) {
             events->publish(events::ItemPickedUp{static_cast<std::uint8_t>(item.type)});
         }

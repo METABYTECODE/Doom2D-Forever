@@ -31,18 +31,62 @@ void PlayerState::snap_to(float spawn_x, float spawn_y) {
     on_lift_ = false;
     health_ = kMaxHealth;
     combat_.reset_single_player_loadout();
+    armor_ = 0;
+    key_red_ = false;
+    key_green_ = false;
+    key_blue_ = false;
 }
 
 bool PlayerState::apply_damage(int amount) {
     if (amount <= 0 || !alive()) {
         return false;
     }
-    health_ = std::max(0, health_ - amount);
+
+    int remaining = amount;
+    if (armor_ > 0) {
+        const int absorbed = std::min(armor_, remaining);
+        armor_ -= absorbed;
+        remaining -= absorbed;
+    }
+
+    if (remaining <= 0) {
+        return false;
+    }
+
+    health_ = std::max(0, health_ - remaining);
     return !alive();
 }
 
 void PlayerState::restore_health() {
     health_ = kMaxHealth;
+}
+
+void PlayerState::set_armor(int value) {
+    armor_ = std::clamp(value, 0, kArmorLimit);
+}
+
+bool PlayerState::give_key_red() {
+    if (key_red_) {
+        return false;
+    }
+    key_red_ = true;
+    return true;
+}
+
+bool PlayerState::give_key_green() {
+    if (key_green_) {
+        return false;
+    }
+    key_green_ = true;
+    return true;
+}
+
+bool PlayerState::give_key_blue() {
+    if (key_blue_) {
+        return false;
+    }
+    key_blue_ = true;
+    return true;
 }
 
 bool PlayerState::add_health(int amount, int max_health) {

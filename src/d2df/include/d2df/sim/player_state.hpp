@@ -40,6 +40,9 @@ struct PlayerState {
     static constexpr int kVelSwim = 4;
 
     static constexpr int kMaxHealth = 100;
+    static constexpr int kHealthLimit = 200;
+    static constexpr int kArmorSoftCap = 100;
+    static constexpr int kArmorLimit = 200;
     static constexpr int kTrapDamage = 1000;
     static constexpr int kAcidDamagePeriod = 15;
 
@@ -53,6 +56,10 @@ struct PlayerState {
     [[nodiscard]] bool on_lift() const { return on_lift_; }
     [[nodiscard]] bool alive() const { return health_ > 0; }
     [[nodiscard]] int health() const { return health_; }
+    [[nodiscard]] int armor() const { return armor_; }
+    [[nodiscard]] bool has_key_red() const { return key_red_; }
+    [[nodiscard]] bool has_key_green() const { return key_green_; }
+    [[nodiscard]] bool has_key_blue() const { return key_blue_; }
     [[nodiscard]] int tick() const { return tick_; }
     [[nodiscard]] float render_x(float alpha) const;
     [[nodiscard]] float render_y(float alpha) const;
@@ -64,6 +71,11 @@ struct PlayerState {
     /// Raise health up to cap; returns false if already at or above cap.
     bool add_health(int amount, int max_health);
     void set_health(int value);
+    void set_armor(int value);
+  /// @return false if the player already has this key.
+    bool give_key_red();
+    bool give_key_green();
+    bool give_key_blue();
 
     [[nodiscard]] PlayerCombat& combat() { return combat_; }
     [[nodiscard]] const PlayerCombat& combat() const { return combat_; }
@@ -76,6 +88,10 @@ private:
 
     int tick_ = 0;
     int health_ = kMaxHealth;
+    int armor_ = 0;
+    bool key_red_ = false;
+    bool key_green_ = false;
+    bool key_blue_ = false;
     bool on_ground_ = false;
     bool in_water_ = false;
     bool in_acid_ = false;

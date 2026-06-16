@@ -436,10 +436,58 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
         camera_.world_rect_to_screen(item.x, item.y, item.width, item.height, viewport_w,
                                      viewport_h, dst_x, dst_y, dst_w, dst_h);
 
+        if (dst_w <= 0 || dst_h <= 0) {
+            continue;
+        }
+
+        const SDL_Rect dst{dst_x, dst_y, dst_w, dst_h};
+        const auto sprite = map::item_sprite(item.type);
+        SDL_Texture* texture =
+            sprite.texture_id != nullptr ? textures_->get(sprite.texture_id) : nullptr;
+
+        if (texture != nullptr) {
+            int tex_w = 0;
+            int tex_h = 0;
+            SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+            if (tex_w > 0 && tex_h > 0) {
+                const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
+                const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
+
+                int sprite_dst_x = 0;
+                int sprite_dst_y = 0;
+                int sprite_dst_w = 0;
+                int sprite_dst_h = 0;
+                camera_.world_rect_to_screen(item.x, item.y, static_cast<float>(frame_w),
+                                             static_cast<float>(frame_h), viewport_w, viewport_h,
+                                             sprite_dst_x, sprite_dst_y, sprite_dst_w,
+                                             sprite_dst_h);
+
+                if (sprite_dst_w > 0 && sprite_dst_h > 0) {
+                    SDL_SetTextureAlphaMod(texture, 255);
+                    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+                    const SDL_Rect src{0, 0, frame_w, frame_h};
+                    const SDL_Rect sprite_dst{sprite_dst_x, sprite_dst_y, sprite_dst_w,
+                                              sprite_dst_h};
+                    SDL_RenderCopy(renderer_, texture, &src, &sprite_dst);
+                    continue;
+                }
+            }
+        }
+
         const auto type = item.type;
         if (type == map::ItemType::MedkitSmall || type == map::ItemType::MedkitLarge ||
             type == map::ItemType::MedkitBlack) {
             SDL_SetRenderDrawColor(renderer_, 80, 220, 120, 220);
+        } else if (type == map::ItemType::ArmorGreen) {
+            SDL_SetRenderDrawColor(renderer_, 80, 200, 80, 220);
+        } else if (type == map::ItemType::ArmorBlue) {
+            SDL_SetRenderDrawColor(renderer_, 80, 140, 255, 220);
+        } else if (type == map::ItemType::KeyRed) {
+            SDL_SetRenderDrawColor(renderer_, 220, 60, 60, 220);
+        } else if (type == map::ItemType::KeyGreen) {
+            SDL_SetRenderDrawColor(renderer_, 60, 220, 60, 220);
+        } else if (type == map::ItemType::KeyBlue) {
+            SDL_SetRenderDrawColor(renderer_, 60, 120, 255, 220);
         } else if (type >= map::ItemType::AmmoBullets && type <= map::ItemType::AmmoBackpack) {
             SDL_SetRenderDrawColor(renderer_, 240, 200, 60, 220);
         } else if (type == map::ItemType::SphereBlue || type == map::ItemType::SphereWhite) {
@@ -450,10 +498,9 @@ void MapViewer::draw_items(int viewport_w, int viewport_h) {
             SDL_SetRenderDrawColor(renderer_, 180, 180, 180, 200);
         }
 
-        const SDL_Rect rect{dst_x, dst_y, dst_w, dst_h};
-        SDL_RenderFillRect(renderer_, &rect);
+        SDL_RenderFillRect(renderer_, &dst);
         SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 180);
-        SDL_RenderDrawRect(renderer_, &rect);
+        SDL_RenderDrawRect(renderer_, &dst);
     }
 }
 
@@ -497,11 +544,24 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
     if (combat.bfg_charge_ticks >= 0) {
         charge = "  [BFG charge " + std::to_string(combat.bfg_charge_ticks) + "]";
     }
+    std::string keys;
+    if (player.has_key_red()) {
+        keys += "R";
+    }
+    if (player.has_key_green()) {
+        keys += "G";
+    }
+    if (player.has_key_blue()) {
+        keys += "B";
+    }
+  const std::string key_line = keys.empty() ? "" : "  Keys " + keys;
     const std::string hud = map_.name + "  (" + std::to_string(map_index_ + 1) + "/" +
                             std::to_string(map_list_.size()) + ")  HP " +
                             std::to_string(player.health()) + "/" +
-                            std::to_string(sim::PlayerState::kMaxHealth) + "  |  " + weapon +
-                            " " + std::to_string(ammo) + charge +
+                            std::to_string(sim::PlayerState::kMaxHealth) + "  AP " +
+                            std::to_string(player.armor()) + "/" +
+                            std::to_string(sim::PlayerState::kArmorLimit) + key_line + "  |  " +
+                            weapon + " " + std::to_string(ammo) + charge +
                             "  |  1-9 weapons  0/B=BFG  -/G=SuperCG  Q prev  wheel zoom  " +
                             state;
     text_.draw(renderer_, hud, 8, viewport_h - 24);
