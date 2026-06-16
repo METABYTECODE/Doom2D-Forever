@@ -82,6 +82,35 @@ const char* weapon_display_name(WeaponId weapon) {
     }
 }
 
+const char* weapon_fire_sfx(WeaponId weapon) {
+    switch (weapon) {
+    case WeaponId::Knuckles:
+        return "sfx.world.hitpunch";
+    case WeaponId::Saw:
+        return "sfx.world.firesaw";
+    case WeaponId::Pistol:
+        return "sfx.world.firepistol";
+    case WeaponId::Shotgun1:
+        return "sfx.world.fireshotgun";
+    case WeaponId::Shotgun2:
+        return "sfx.world.fireshotgun2";
+    case WeaponId::Chaingun:
+        return "sfx.world.firecgun";
+    case WeaponId::RocketLauncher:
+        return "sfx.world.firerocket";
+    case WeaponId::Plasma:
+        return "sfx.world.fireplasma";
+    case WeaponId::Bfg:
+        return "sfx.world.firebfg";
+    case WeaponId::SuperChaingun:
+        return "sfx.world.firerev";
+    case WeaponId::Flamethrower:
+        return "sfx.world.flameloop";
+    default:
+        return nullptr;
+    }
+}
+
 void PlayerCombat::reset_single_player_loadout() {
     current_weapon = WeaponId::Pistol;
     for (auto& owned_weapon : owned) {

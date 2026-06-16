@@ -24,6 +24,10 @@ bool ShootableTarget::apply_damage(int amount, EntityId attacker_id) {
     health = std::max(0, health - amount);
     if (health <= 0 && is_monster() && !map::monster_vanishes_on_death(monster_type)) {
         life_state = MonsterLifeState::Corpse;
+        prev_x = x;
+        prev_y = y;
+        vel_x = 0;
+        vel_y = 0;
     }
     return !alive();
 }

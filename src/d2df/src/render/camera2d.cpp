@@ -1,6 +1,7 @@
 #include <d2df/render/camera2d.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace d2df::render {
 
@@ -36,10 +37,10 @@ void Camera2D::world_rect_to_screen(float world_x, float world_y, float world_w,
     const float screen_cy = static_cast<float>(viewport_h) * 0.5f;
     const float scale_f = static_cast<float>(scale);
 
-    out_x = static_cast<int>(screen_cx + (world_x - center_x) * scale_f);
-    out_y = static_cast<int>(screen_cy + (world_y - center_y) * scale_f);
-    out_w = static_cast<int>(world_w * scale_f);
-    out_h = static_cast<int>(world_h * scale_f);
+    out_x = static_cast<int>(std::lround(screen_cx + (world_x - center_x) * scale_f));
+    out_y = static_cast<int>(std::lround(screen_cy + (world_y - center_y) * scale_f));
+    out_w = static_cast<int>(std::lround(world_w * scale_f));
+    out_h = static_cast<int>(std::lround(world_h * scale_f));
 }
 
 } // namespace d2df::render

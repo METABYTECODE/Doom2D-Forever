@@ -200,7 +200,15 @@ bool MapCollision::can_move_y(float x, float y, float width, float height, int y
 }
 
 bool MapCollision::move_axis_x(float& xtemp, float& ytemp, float width, float height, int xstep,
-                               int ystep, std::uint16_t& state, bool climb_slopes) const {
+                               int ystep, std::uint16_t& state, bool climb_slopes,
+                               bool block_monsters) const {
+    if (block_monsters &&
+        collides_panel(xtemp + static_cast<float>(xstep), ytemp, width, height,
+                       map::PANEL_BLOCKMON)) {
+        state |= MOVE_BLOCK;
+        return false;
+    }
+
     auto collides_solid_at = [&](float px, float py) {
         for (std::size_t i = 0; i < panels_.size(); ++i) {
             const auto& panel = panels_[i];
@@ -247,8 +255,15 @@ bool MapCollision::move_axis_x(float& xtemp, float& ytemp, float width, float he
 }
 
 bool MapCollision::move_axis_y(float& xtemp, float& ytemp, float width, float height, int xstep,
-                               int ystep, std::uint16_t& state) const {
+                               int ystep, std::uint16_t& state, bool block_monsters) const {
     (void)xstep;
+    if (block_monsters &&
+        collides_panel(xtemp, ytemp + static_cast<float>(ystep), width, height,
+                       map::PANEL_BLOCKMON)) {
+        state |= MOVE_BLOCK;
+        return false;
+    }
+
     if (!can_move_y(xtemp, ytemp, width, height, ystep)) {
         if (ystep > 0) {
             state |= MOVE_HITLAND;
@@ -270,12 +285,16 @@ bool MapCollision::move_axis_y(float& xtemp, float& ytemp, float width, float he
     return true;
 }
 
-std::uint16_t MapCollision::move_object(float& x, float& y, float width, float height, int dx,
-                                        int dy, bool climb_slopes) const {
+std::uint16_t MapCollision::move_body(float& x, float& y, float width, float height, int dx,
+                                      int dy, bool climb_slopes, bool block_monsters) const {
     std::uint16_t state = MOVE_NONE;
 
     if (in_liquid(x, y, width, height)) {
         state |= MOVE_INWATER;
+    }
+
+    if (block_monsters && collides_panel(x, y, width, height, map::PANEL_BLOCKMON)) {
+        state |= MOVE_BLOCK;
     }
 
     if (dx == 0 && dy == 0) {
@@ -288,14 +307,15 @@ std::uint16_t MapCollision::move_object(float& x, float& y, float width, float h
     const int ystep = sign_int(dy);
 
     for (int i = 0; i < std::abs(dx); ++i) {
-        if (!move_axis_x(xtemp, ytemp, width, height, xstep, ystep, state, climb_slopes)) {
+        if (!move_axis_x(xtemp, ytemp, width, height, xstep, ystep, state, climb_slopes,
+                         block_monsters)) {
             break;
         }
         x = xtemp;
     }
 
     for (int i = 0; i < std::abs(dy); ++i) {
-        if (!move_axis_y(xtemp, ytemp, width, height, xstep, ystep, state)) {
+        if (!move_axis_y(xtemp, ytemp, width, height, xstep, ystep, state, block_monsters)) {
             break;
         }
         y = ytemp;
@@ -304,6 +324,16 @@ std::uint16_t MapCollision::move_object(float& x, float& y, float width, float h
     x = xtemp;
     y = ytemp;
     return state;
+}
+
+std::uint16_t MapCollision::move_object(float& x, float& y, float width, float height, int dx,
+                                        int dy, bool climb_slopes) const {
+    return move_body(x, y, width, height, dx, dy, climb_slopes, false);
+}
+
+std::uint16_t MapCollision::move_monster(float& x, float& y, float width, float height, int dx,
+                                         int dy, bool climb_slopes) const {
+    return move_body(x, y, width, height, dx, dy, climb_slopes, true);
 }
 
 bool MapCollision::segment_intersects_aabb(float x0, float y0, float x1, float y1, float bx,

@@ -371,6 +371,29 @@ void tick_falling_item(WorldItem& item, const MapCollision& collision) {
 
 } // namespace
 
+void ItemSystem::spawn_monster_drop(map::ItemType type, float center_x, float center_y, int vel_x,
+                                    int vel_y) {
+    if (type == map::ItemType::None) {
+        return;
+    }
+
+    WorldItem item;
+    item.type = type;
+    const auto dims = map::item_dimensions(type);
+    item.x = center_x - dims.width * 0.5f;
+    item.y = center_y - dims.height * 0.5f;
+    item.spawn_x = item.x;
+    item.spawn_y = item.y;
+    item.width = dims.width;
+    item.height = dims.height;
+    item.fall = true;
+    item.respawnable = false;
+    item.vel_x = vel_x;
+    item.vel_y = vel_y;
+    item.active = true;
+    items_.push_back(item);
+}
+
 void ItemSystem::reset(const map::MapDocument& map, const GameRules& rules) {
     rules_ = rules;
     items_.clear();

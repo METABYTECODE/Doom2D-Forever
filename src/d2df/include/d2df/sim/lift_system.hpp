@@ -12,9 +12,10 @@ public:
     void reset(const std::vector<map::MapPanel>& panels);
     void apply_on_load(std::vector<map::MapPanel>& panels,
                          const std::vector<map::MapTrigger>& triggers);
-    void toggle_group_for_zone(std::vector<map::MapPanel>& panels, std::int32_t zone_panel_index);
-    void set_group_for_zone(std::vector<map::MapPanel>& panels, std::int32_t zone_panel_index,
-                            bool up);
+    [[nodiscard]] bool toggle_group_for_zone(std::vector<map::MapPanel>& panels,
+                                             std::int32_t zone_panel_index);
+    [[nodiscard]] bool set_group_for_zone(std::vector<map::MapPanel>& panels,
+                                            std::int32_t zone_panel_index, bool up);
 
 private:
     struct LiftGroup {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <d2df/core/game_events.hpp>
 #include <d2df/map/map_document.hpp>
 #include <d2df/sim/lift_system.hpp>
 #include <d2df/sim/map_collision.hpp>
@@ -45,8 +46,9 @@ private:
     [[nodiscard]] bool try_teleport_player(PlayerState& player, float tx, float ty,
                                            EventBus* events);
     void set_door_group_open(std::int32_t panel_index, bool open);
+    [[nodiscard]] events::DoorSound door_group_transition(std::int32_t panel_index, bool open) const;
     void close_trap_group(std::int32_t panel_index, PlayerState& player, EventBus* events);
-    void tick_door_timers();
+    void tick_door_timers(EventBus* events);
     void resolve_missing_expander_zones();
     void tick_expanders(PlayerState& player, EventBus* events);
     void queue_expander(std::size_t trigger_index);

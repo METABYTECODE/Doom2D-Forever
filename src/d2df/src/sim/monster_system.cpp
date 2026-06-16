@@ -58,6 +58,27 @@ void publish_monster_damage(EventBus* events, int amount, int health_remaining) 
     }
 }
 
+void try_wake_monster(ShootableTarget& monster, bool should_chase, EventBus* events) {
+    if (monster.is_awake || !should_chase) {
+        return;
+    }
+
+    monster.is_awake = true;
+    if (events == nullptr) {
+        return;
+    }
+
+    const char* sfx = map::monster_alert_sfx(monster.monster_type, monster.id);
+    if (sfx == nullptr) {
+        return;
+    }
+
+    events->publish(events::MonsterAlerted{monster.id,
+                                           static_cast<std::uint8_t>(monster.monster_type),
+                                           monster.x,
+                                           monster.y});
+}
+
 int z_dec(int value, int amount) {
     if (value > 0) {
         return std::max(0, value - amount);
@@ -147,12 +168,16 @@ void move_monster_body(ShootableTarget& monster, const MapCollision& collision,
     float next_x = monster.x;
     float next_y = monster.y;
     const auto move_state =
-        collision.move_object(next_x, next_y, monster.width, monster.height, monster.vel_x,
-                              monster.vel_y, climb_slopes);
+        collision.move_monster(next_x, next_y, monster.width, monster.height, monster.vel_x,
+                               monster.vel_y, climb_slopes);
     monster.x = next_x;
     monster.y = next_y;
     monster.in_water = (move_state & MOVE_INWATER) != 0;
 
+    if ((move_state & MOVE_BLOCK) != 0) {
+        monster.facing_left = !monster.facing_left;
+        monster.vel_x = 0;
+    }
     if ((move_state & MOVE_HITWALL) != 0) {
         monster.vel_x = 0;
     }
@@ -306,6 +331,7 @@ ShootableTarget make_spawned_soul(EntityId id, float spawn_x, float spawn_y, boo
     soul.max_health = stats.health;
     soul.health = stats.health;
     soul.aggro_player = aggro_player;
+    soul.is_awake = aggro_player;
     return soul;
 }
 
@@ -358,7 +384,7 @@ void tick_passive_monster(ShootableTarget& monster) {
     }
 
     if (monster.is_corpse()) {
-        ++monster.anim_tick;
+        return;
     }
 }
 
@@ -430,6 +456,7 @@ void tick_monster(ShootableTarget& monster, const MapCollision& collision, Playe
     const bool can_see =
         in_range && monster_can_see_player(collision, monster, player_center_x, player_center_y);
     const bool should_chase = in_range && (can_see || monster.aggro_player);
+    try_wake_monster(monster, should_chase, events);
 
     if (try_pain_spawn_soul(monster, player_center_x, player_center_y, dx, dy, can_see, targets,
                             next_monster_id)) {

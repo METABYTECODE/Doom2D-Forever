@@ -67,6 +67,21 @@ struct EntityDied {
     DamageSource source = DamageSource::Weapon;
 };
 
+struct MonsterDied {
+    EntityId entity_id = 0;
+    std::uint8_t monster_type = 0;
+};
+
+enum class ExplosionKind : std::uint8_t {
+    Rocket = 0,
+    Plasma = 1,
+    Bfg = 2,
+};
+
+struct WorldExplosion {
+    ExplosionKind kind = ExplosionKind::Rocket;
+};
+
 struct ItemPickedUp {
     std::uint8_t item_type = 0;
 };
@@ -78,6 +93,30 @@ struct ItemRespawned {
 
 struct PlayerTeleported {
     bool blocked = false;
+};
+
+enum class DoorSound : std::uint8_t {
+    None = 0,
+    Open,
+    Close,
+};
+
+struct WorldDoorChanged {
+    float x = 0.f;
+    float y = 0.f;
+    DoorSound sound = DoorSound::None;
+};
+
+struct WorldSwitchActivated {
+    float x = 0.f;
+    float y = 0.f;
+};
+
+struct MonsterAlerted {
+    EntityId entity_id = 0;
+    std::uint8_t monster_type = 0;
+    float x = 0.f;
+    float y = 0.f;
 };
 
 } // namespace d2df::events

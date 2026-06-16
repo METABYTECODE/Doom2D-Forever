@@ -324,4 +324,20 @@ ItemSprite item_sprite(ItemType type) {
     }
 }
 
+const char* item_pickup_sfx(ItemType type) {
+    if (item_is_weapon(type)) {
+        return "sfx.world.getweapon";
+    }
+    switch (type) {
+    case ItemType::Invul:
+    case ItemType::Invis:
+    case ItemType::Suit:
+    case ItemType::SphereBlue:
+    case ItemType::SphereWhite:
+        return "sfx.world.getpowerup";
+    default:
+        return "sfx.world.getitem";
+    }
+}
+
 } // namespace d2df::map

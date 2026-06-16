@@ -76,5 +76,6 @@ struct ItemSprite {
 [[nodiscard]] bool item_respawns_in_single_player(ItemType type);
 [[nodiscard]] bool item_respawns_in_multiplayer(ItemType type);
 [[nodiscard]] bool item_is_weapon(ItemType type);
+[[nodiscard]] const char* item_pickup_sfx(ItemType type);
 
 } // namespace d2df::map

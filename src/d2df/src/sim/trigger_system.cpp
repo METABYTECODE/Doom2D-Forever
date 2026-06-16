@@ -30,6 +30,33 @@ void publish_trap_damage(EventBus* events, int health_before, const PlayerState&
     }
 }
 
+void publish_door_sound(EventBus* events, float x, float y, events::DoorSound sound) {
+    if (events == nullptr || sound == events::DoorSound::None) {
+        return;
+    }
+    events->publish(events::WorldDoorChanged{x, y, sound});
+}
+
+void publish_switch_sound(EventBus* events, float x, float y) {
+    if (events == nullptr) {
+        return;
+    }
+    events->publish(events::WorldSwitchActivated{x, y});
+}
+
+[[nodiscard]] float trigger_sound_x(const map::MapTrigger& trigger) {
+    return static_cast<float>(trigger.position.x) + static_cast<float>(trigger.size.width) * 0.5f;
+}
+
+[[nodiscard]] float trigger_sound_y(const map::MapTrigger& trigger) {
+    return static_cast<float>(trigger.position.y) + static_cast<float>(trigger.size.height) * 0.5f;
+}
+
+[[nodiscard]] std::pair<float, float> panel_sound_pos(const map::MapPanel& panel) {
+    return {static_cast<float>(panel.position.x) + static_cast<float>(panel.size.width) * 0.5f,
+            static_cast<float>(panel.position.y) + static_cast<float>(panel.size.height) * 0.5f};
+}
+
 bool is_door_panel(const map::MapPanel& panel) {
     return (panel.type & kDoorMask) != 0;
 }
@@ -216,6 +243,44 @@ void TriggerSystem::build_door_groups() {
     }
 }
 
+events::DoorSound TriggerSystem::door_group_transition(std::int32_t panel_index,
+                                                       bool open) const {
+    if (panel_index < 0) {
+        return events::DoorSound::None;
+    }
+
+    auto transition_for_indices = [&](const std::vector<std::size_t>& indices) {
+        events::DoorSound sound = events::DoorSound::None;
+        for (const auto idx : indices) {
+            if (idx >= panels_.size()) {
+                continue;
+            }
+            const bool was_closed = panels_[idx].enabled;
+            if (open && was_closed) {
+                sound = events::DoorSound::Open;
+            } else if (!open && !was_closed) {
+                sound = events::DoorSound::Close;
+            }
+        }
+        return sound;
+    };
+
+    for (const auto& group : door_groups_) {
+        const auto found =
+            std::find_if(group.begin(), group.end(), [&](std::size_t idx) {
+                return static_cast<std::int32_t>(idx) == panel_index;
+            });
+        if (found != group.end()) {
+            return transition_for_indices(group);
+        }
+    }
+
+    if (static_cast<std::size_t>(panel_index) < panels_.size()) {
+        return transition_for_indices({static_cast<std::size_t>(panel_index)});
+    }
+    return events::DoorSound::None;
+}
+
 void TriggerSystem::set_door_group_open(std::int32_t panel_index, bool open) {
     if (panel_index < 0) {
         return;
@@ -284,14 +349,20 @@ void TriggerSystem::close_trap_group(std::int32_t panel_index, PlayerState& play
     }
 }
 
-void TriggerSystem::tick_door_timers() {
+void TriggerSystem::tick_door_timers(EventBus* events) {
     for (auto& timer : trap_timers_) {
         if (timer.second <= 0) {
             continue;
         }
         --timer.second;
         if (timer.second == 0) {
+            const auto sound = door_group_transition(timer.first, true);
             set_door_group_open(timer.first, true);
+            if (sound != events::DoorSound::None &&
+                static_cast<std::size_t>(timer.first) < panels_.size()) {
+                const auto [sx, sy] = panel_sound_pos(panels_[static_cast<std::size_t>(timer.first)]);
+                publish_door_sound(events, sx, sy, sound);
+            }
         }
     }
 
@@ -301,7 +372,13 @@ void TriggerSystem::tick_door_timers() {
         }
         --timer.second;
         if (timer.second == 0) {
+            const auto sound = door_group_transition(timer.first, false);
             set_door_group_open(timer.first, false);
+            if (sound != events::DoorSound::None &&
+                static_cast<std::size_t>(timer.first) < panels_.size()) {
+                const auto [sx, sy] = panel_sound_pos(panels_[static_cast<std::size_t>(timer.first)]);
+                publish_door_sound(events, sx, sy, sound);
+            }
             timer.second = -1;
         }
     }
@@ -523,12 +600,18 @@ void TriggerSystem::activate_trigger(std::size_t trigger_index, PlayerState& pla
         (void)try_teleport_player(player, tx, ty, events);
         break;
     }
-    case map::TriggerType::OpenDoor:
+    case map::TriggerType::OpenDoor: {
+        const auto sound = door_group_transition(trigger.target_panel, true);
         set_door_group_open(trigger.target_panel, true);
+        publish_door_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger), sound);
         break;
-    case map::TriggerType::CloseDoor:
+    }
+    case map::TriggerType::CloseDoor: {
+        const auto sound = door_group_transition(trigger.target_panel, false);
         set_door_group_open(trigger.target_panel, false);
+        publish_door_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger), sound);
         break;
+    }
     case map::TriggerType::CloseTrap:
         close_trap_group(trigger.target_panel, player, events);
         break;
@@ -543,34 +626,50 @@ void TriggerSystem::activate_trigger(std::size_t trigger_index, PlayerState& pla
                 if (static_cast<std::int32_t>(idx) == trigger.target_panel) {
                     any_enabled = std::any_of(group.begin(), group.end(),
                                               [&](std::size_t i) { return panels_[i].enabled; });
+                    const auto sound = door_group_transition(trigger.target_panel, any_enabled);
                     set_door_group_open(trigger.target_panel, any_enabled);
+                    publish_door_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger),
+                                       sound);
                     mark_trigger_used(trigger_index);
                     return;
                 }
             }
         }
         if (static_cast<std::size_t>(trigger.target_panel) < panels_.size()) {
-            set_door_group_open(trigger.target_panel, panels_[trigger.target_panel].enabled);
+            const bool open_doors = panels_[trigger.target_panel].enabled;
+            const auto sound = door_group_transition(trigger.target_panel, open_doors);
+            set_door_group_open(trigger.target_panel, open_doors);
+            publish_door_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger), sound);
         }
         break;
     }
-    case map::TriggerType::Door5:
+    case map::TriggerType::Door5: {
+        const auto sound = door_group_transition(trigger.target_panel, true);
         set_door_group_open(trigger.target_panel, true);
+        publish_door_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger), sound);
         door5_timers_.push_back({trigger.target_panel, kDoor5CloseTicks});
         break;
+    }
     case map::TriggerType::LiftUp:
-        lift_.set_group_for_zone(panels_, trigger.target_panel, true);
+        if (lift_.set_group_for_zone(panels_, trigger.target_panel, true)) {
+            publish_switch_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger));
+        }
         break;
     case map::TriggerType::LiftDown:
-        lift_.set_group_for_zone(panels_, trigger.target_panel, false);
+        if (lift_.set_group_for_zone(panels_, trigger.target_panel, false)) {
+            publish_switch_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger));
+        }
         break;
     case map::TriggerType::Lift:
-        lift_.toggle_group_for_zone(panels_, trigger.target_panel);
+        if (lift_.toggle_group_for_zone(panels_, trigger.target_panel)) {
+            publish_switch_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger));
+        }
         break;
     case map::TriggerType::Press:
     case map::TriggerType::On:
     case map::TriggerType::Off:
     case map::TriggerType::OnOff:
+        publish_switch_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger));
         queue_expander(trigger_index);
         mark_trigger_used(trigger_index);
         return;
@@ -620,7 +719,7 @@ void TriggerSystem::update(PlayerState& player, bool use_pressed, EventBus* even
                            const std::vector<ShootableTarget>* monsters,
                            const MapCollision* collision) {
     active_collision_ = collision;
-    tick_door_timers();
+    tick_door_timers(events);
 
     for (std::size_t i = 0; i < triggers_.size(); ++i) {
         if (trigger_timeout_[i] > 0) {

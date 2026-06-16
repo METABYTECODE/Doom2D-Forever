@@ -62,5 +62,6 @@ struct PlayerCombat {
 [[nodiscard]] int weapon_reload_ticks(WeaponId weapon);
 [[nodiscard]] AmmoType weapon_ammo_type(WeaponId weapon);
 [[nodiscard]] const char* weapon_display_name(WeaponId weapon);
+[[nodiscard]] const char* weapon_fire_sfx(WeaponId weapon);
 
 } // namespace d2df::sim

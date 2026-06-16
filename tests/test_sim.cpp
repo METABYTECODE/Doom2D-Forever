@@ -14,6 +14,7 @@
 #include <d2df/map/map_document.hpp>
 #include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/map_spawn.hpp>
+#include <d2df/map/monster_types.hpp>
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/trigger_types.hpp>
 
@@ -221,6 +222,85 @@ TEST_CASE("PANEL_BLOCKMON does not block player movement", "[sim]") {
     const auto state = collision.move_object(x, y, width, height, 40, 0, false);
     CHECK((state & sim::MOVE_HITWALL) == 0);
     CHECK(x > 80.0f);
+}
+
+TEST_CASE("PANEL_BLOCKMON blocks monster movement", "[sim][monsters]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& blocker = doc.panels.back();
+    blocker.type = map::PANEL_BLOCKMON;
+    blocker.position = {100, 100};
+    blocker.size = {32, 128};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    const float width = 34.0f;
+    const float height = 52.0f;
+    float x = 60.0f;
+    float y = 100.0f;
+    const auto state = collision.move_monster(x, y, width, height, 40, 0, false);
+    CHECK((state & sim::MOVE_BLOCK) != 0);
+    CHECK(x <= 66.0f);
+    CHECK(x + width <= 101.0f);
+}
+
+TEST_CASE("zomby death drops ammo clip", "[sim][monsters]") {
+    ecs::GameWorld world;
+    map::MapDocument doc;
+
+    std::vector<sim::ShootableTarget>& targets = world.targets();
+    sim::ShootableTarget zomby;
+    zomby.id = 200;
+    zomby.monster_type = map::MonsterType::Zomby;
+    zomby.x = 200.0f;
+    zomby.y = 200.0f;
+    zomby.prev_x = zomby.x;
+    zomby.prev_y = zomby.y;
+    zomby.width = 34.0f;
+    zomby.height = 52.0f;
+    zomby.max_health = 15;
+    zomby.health = 15;
+    targets.push_back(zomby);
+
+    sim::MapCollision collision;
+    sim::PlayerInput none{};
+    targets.front().apply_damage(15, d2df::kPlayerEntityId);
+    world.fixed_update(collision, none, nullptr, 512, 512, nullptr);
+
+    CHECK(std::any_of(world.items().items().begin(), world.items().items().end(),
+                      [](const sim::WorldItem& item) {
+                          return item.active && item.type == map::ItemType::AmmoBullets;
+                      }));
+}
+
+TEST_CASE("sergeant death drops shotgun", "[sim][monsters]") {
+    ecs::GameWorld world;
+    map::MapDocument doc;
+
+    std::vector<sim::ShootableTarget>& targets = world.targets();
+    sim::ShootableTarget serg;
+    serg.id = 201;
+    serg.monster_type = map::MonsterType::Serg;
+    serg.x = 200.0f;
+    serg.y = 200.0f;
+    serg.prev_x = serg.x;
+    serg.prev_y = serg.y;
+    serg.width = 34.0f;
+    serg.height = 52.0f;
+    serg.max_health = 30;
+    serg.health = 30;
+    targets.push_back(serg);
+
+    sim::MapCollision collision;
+    sim::PlayerInput none{};
+    targets.front().apply_damage(30, d2df::kPlayerEntityId);
+    world.fixed_update(collision, none, nullptr, 512, 512, nullptr);
+
+    CHECK(std::any_of(world.items().items().begin(), world.items().items().end(),
+                      [](const sim::WorldItem& item) {
+                          return item.active && item.type == map::ItemType::WeaponShotgun1;
+                      }));
 }
 
 TEST_CASE("vertical lift zone pulls player upward", "[sim]") {
@@ -1890,11 +1970,20 @@ TEST_CASE("killed zomby becomes corpse instead of immediate removal", "[sim][mon
     zomby.monster_type = map::MonsterType::Zomby;
     zomby.max_health = 15;
     zomby.health = 15;
+    zomby.x = 100.0f;
+    zomby.y = 140.0f;
+    zomby.prev_x = 80.0f;
+    zomby.prev_y = 140.0f;
+    zomby.vel_x = 3;
     targets.push_back(zomby);
 
     targets.front().apply_damage(15, d2df::kPlayerEntityId);
     CHECK_FALSE(targets.front().alive());
     CHECK(targets.front().is_corpse());
+    CHECK(std::abs(targets.front().x - 100.0f) < 0.01f);
+    CHECK(std::abs(targets.front().prev_x - 100.0f) < 0.01f);
+    CHECK(std::abs(targets.front().prev_y - 140.0f) < 0.01f);
+    CHECK(targets.front().vel_x == 0);
     CHECK(targets.size() == 1);
 }
 
@@ -1967,4 +2056,188 @@ TEST_CASE("arch vile revives overlapping corpse", "[sim][monsters]") {
         }
     }
     CHECK(revived);
+}
+
+TEST_CASE("weapon and monster sfx asset ids resolve", "[sim][audio]") {
+    CHECK(std::string_view(sim::weapon_fire_sfx(sim::WeaponId::Pistol)) == "sfx.world.firepistol");
+    CHECK(std::string_view(sim::weapon_fire_sfx(sim::WeaponId::RocketLauncher)) ==
+          "sfx.world.firerocket");
+    CHECK(std::string_view(map::monster_die_sfx(map::MonsterType::Barrel)) ==
+          "sfx.monster.barrel_die");
+    CHECK(std::string_view(map::item_pickup_sfx(map::ItemType::WeaponChaingun)) ==
+          "sfx.world.getweapon");
+    CHECK(std::string_view(map::item_pickup_sfx(map::ItemType::MedkitSmall)) ==
+          "sfx.world.getitem");
+}
+
+TEST_CASE("MonsterDied event publishes on monster death", "[sim][audio]") {
+    ecs::GameWorld world;
+    map::MapDocument doc;
+
+    std::vector<sim::ShootableTarget>& targets = world.targets();
+    sim::ShootableTarget barrel;
+    barrel.id = 200;
+    barrel.monster_type = map::MonsterType::Barrel;
+    barrel.x = 200.0f;
+    barrel.y = 200.0f;
+    barrel.width = 24.0f;
+    barrel.height = 36.0f;
+    barrel.max_health = 20;
+    barrel.health = 20;
+    targets.push_back(barrel);
+
+    world.player().snap_to(500.0f, 500.0f);
+
+    d2df::EventBus bus;
+    int died_count = 0;
+    bus.subscribe<events::MonsterDied>(
+        [&](const events::MonsterDied& event) {
+            ++died_count;
+            CHECK(event.entity_id == 200);
+            CHECK(event.monster_type == static_cast<std::uint8_t>(map::MonsterType::Barrel));
+        });
+
+    sim::MapCollision collision;
+    sim::PlayerInput none{};
+    targets.front().apply_damage(20, d2df::kPlayerEntityId);
+    world.fixed_update(collision, none, &bus, 512, 512, nullptr);
+    CHECK(died_count == 1);
+}
+
+TEST_CASE("Monster sprite placement uses legacy hitbox and draw offsets", "[sim]") {
+    const auto zomby_sprite = map::monster_sprite(map::MonsterType::Zomby, false);
+    const auto zomby_stats = map::monster_stats(map::MonsterType::Zomby);
+    const auto zomby_place = map::monster_sprite_placement(
+        map::MonsterType::Zomby, 100.0f, 200.0f, zomby_stats.width, zomby_sprite, false);
+
+    CHECK(std::abs(zomby_place.x - 86.0f) < 0.01f);
+    CHECK(std::abs(zomby_place.y - 188.0f) < 0.01f);
+    CHECK_FALSE(zomby_place.flip_horizontal);
+
+    const auto soul_sprite = map::monster_sprite(map::MonsterType::Soul, false);
+    CHECK(soul_sprite.frame_count == 2);
+
+    const auto soul_stats = map::monster_stats(map::MonsterType::Soul);
+    const auto soul_place = map::monster_sprite_placement(
+        map::MonsterType::Soul, 100.0f, 200.0f, soul_stats.width, soul_sprite, false);
+
+    CHECK(std::abs(soul_place.x - 85.0f) < 0.01f);
+    CHECK(std::abs(soul_place.y - 176.0f) < 0.01f);
+
+    const auto caco_sprite = map::monster_sprite(map::MonsterType::Caco, false);
+    CHECK(caco_sprite.frame_count == 1);
+}
+
+TEST_CASE("OpenDoor trigger publishes door open event", "[sim][audio]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& door = doc.panels.back();
+    door.type = map::PANEL_CLOSEDOOR;
+    door.position = {100, 80};
+    door.size = {16, 48};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trigger = doc.triggers.back();
+    trigger.type = map::TriggerType::OpenDoor;
+    trigger.target_panel = 0;
+    trigger.position = {80, 80};
+    trigger.size = {16, 16};
+    trigger.activate = map::ActivateType::PlayerPress;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    EventBus bus;
+    int door_events = 0;
+    bus.subscribe<events::WorldDoorChanged>([&](const events::WorldDoorChanged& event) {
+        ++door_events;
+        CHECK(event.sound == events::DoorSound::Open);
+    });
+
+    sim::PlayerState player;
+    player.snap_to(78.0f, 78.0f);
+    triggers.update(player, true, &bus);
+
+    CHECK(door_events == 1);
+    CHECK_FALSE(triggers.panels()[0].enabled);
+}
+
+TEST_CASE("Lift toggle publishes switch event when direction changes", "[sim][audio]") {
+    map::MapDocument doc;
+
+    doc.panels.push_back(map::MapPanel{});
+    auto& lift_zone = doc.panels.back();
+    lift_zone.type = map::PANEL_LIFTUP;
+    lift_zone.position = {200, 80};
+    lift_zone.size = {64, 64};
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& trigger = doc.triggers.back();
+    trigger.type = map::TriggerType::Lift;
+    trigger.target_panel = 0;
+    trigger.position = {210, 90};
+    trigger.size = {16, 16};
+    trigger.activate = map::ActivateType::PlayerPress;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    EventBus bus;
+    int switch_events = 0;
+    bus.subscribe<events::WorldSwitchActivated>(
+        [&](const events::WorldSwitchActivated&) { ++switch_events; });
+
+    sim::PlayerState player;
+    player.snap_to(208.0f, 88.0f);
+    triggers.update(player, true, &bus);
+
+    CHECK(switch_events == 1);
+    CHECK((triggers.panels()[0].type & map::PANEL_LIFTDOWN) != 0);
+}
+
+TEST_CASE("Monster alert fires once when player is spotted", "[sim][audio]") {
+    map::MapDocument doc;
+    doc.panels.push_back(map::MapPanel{});
+    auto& floor = doc.panels.back();
+    floor.type = map::PANEL_WALL;
+    floor.position = {0, 200};
+    floor.size = {512, 16};
+
+    sim::MapCollision collision;
+    collision.build_from_panels(doc.panels);
+
+    sim::PlayerState player;
+    player.snap_to(200.0f, 140.0f);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget monster;
+    monster.id = 7;
+    monster.monster_type = map::MonsterType::Zomby;
+    monster.x = 120.0f;
+    monster.y = 140.0f;
+    monster.prev_x = monster.x;
+    monster.prev_y = monster.y;
+    monster.width = 34.0f;
+    monster.height = 52.0f;
+    monster.max_health = 15;
+    monster.health = 15;
+    targets.push_back(monster);
+
+    EventBus bus;
+    int alert_events = 0;
+    bus.subscribe<events::MonsterAlerted>([&](const events::MonsterAlerted& event) {
+        ++alert_events;
+        CHECK(event.entity_id == 7);
+        CHECK(event.monster_type == static_cast<std::uint8_t>(map::MonsterType::Zomby));
+    });
+
+    sim::MonsterSystem monsters;
+    monsters.tick(collision, player, targets, &bus);
+
+    CHECK(alert_events == 1);
+    CHECK(targets[0].is_awake);
+
+    monsters.tick(collision, player, targets, &bus);
+    CHECK(alert_events == 1);
 }

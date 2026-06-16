@@ -41,9 +41,9 @@ void LiftSystem::apply_on_load(std::vector<map::MapPanel>& panels,
             continue;
         }
 
-        const bool up = trigger.type != map::TriggerType::LiftDown;
         if (trigger.type == map::TriggerType::LiftUp || trigger.type == map::TriggerType::LiftDown) {
-            set_group_for_zone(panels, trigger.target_panel, up);
+            (void)set_group_for_zone(panels, trigger.target_panel,
+                                     trigger.type == map::TriggerType::LiftUp);
         }
     }
 
@@ -114,30 +114,42 @@ void LiftSystem::set_group_direction(std::vector<map::MapPanel>& panels, const L
     }
 }
 
-void LiftSystem::toggle_group_for_zone(std::vector<map::MapPanel>& panels,
+bool LiftSystem::toggle_group_for_zone(std::vector<map::MapPanel>& panels,
                                        std::int32_t zone_panel_index) {
     for (const auto& group : groups_) {
         for (const auto zone_index : group.zone_panels) {
             if (static_cast<std::int32_t>(zone_index) != zone_panel_index) {
                 continue;
             }
+            if (zone_index >= panels.size()) {
+                return false;
+            }
             const bool up = (panels[zone_index].type & map::PANEL_LIFTDOWN) != 0;
-            set_group_direction(panels, group, up);
-            return;
+            return set_group_for_zone(panels, zone_panel_index, up);
         }
     }
+    return false;
 }
 
-void LiftSystem::set_group_for_zone(std::vector<map::MapPanel>& panels,
+bool LiftSystem::set_group_for_zone(std::vector<map::MapPanel>& panels,
                                     std::int32_t zone_panel_index, bool up) {
     for (const auto& group : groups_) {
         for (const auto zone_index : group.zone_panels) {
             if (static_cast<std::int32_t>(zone_index) == zone_panel_index) {
+                if (zone_index >= panels.size()) {
+                    return false;
+                }
+                const bool currently_up =
+                    (panels[zone_index].type & map::PANEL_LIFTUP) != 0;
+                if (currently_up == up) {
+                    return false;
+                }
                 set_group_direction(panels, group, up);
-                return;
+                return true;
             }
         }
     }
+    return false;
 }
 
 } // namespace d2df::sim

@@ -224,6 +224,9 @@ void ProjectileSystem::explode_rocket(std::size_t index, TriggerSystem* triggers
     apply_damage_to_targets(targets, cx, cy, static_cast<float>(kRocketExplosionRadius),
                             kRocketExplosionDamage, projectile.shooter_id, events,
                             events::DamageSource::Projectile);
+    if (events != nullptr) {
+        events->publish(events::WorldExplosion{events::ExplosionKind::Rocket});
+    }
     destroy_projectile(index);
 }
 
@@ -241,6 +244,9 @@ void ProjectileSystem::explode_bfg(std::size_t index, TriggerSystem* triggers, P
     apply_damage_to_targets(targets, cx, cy, static_cast<float>(kBfgExplosionRadius),
                             kBfgSplashDamage, projectile.shooter_id, events,
                             events::DamageSource::Projectile);
+    if (events != nullptr) {
+        events->publish(events::WorldExplosion{events::ExplosionKind::Bfg});
+    }
     destroy_projectile(index);
 }
 

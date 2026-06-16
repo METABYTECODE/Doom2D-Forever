@@ -204,6 +204,11 @@ void GameWorld::handle_monster_death_effects(const sim::MapCollision& /*collisio
             target.death_handled = true;
             processed_death = true;
 
+            if (events != nullptr && target.is_monster()) {
+                events->publish(events::MonsterDied{
+                    target.id, static_cast<std::uint8_t>(target.monster_type)});
+            }
+
             const float center_x = target.x + target.width * 0.5f;
             const float center_y = target.y + target.height * 0.5f;
 
@@ -228,8 +233,17 @@ void GameWorld::handle_monster_death_effects(const sim::MapCollision& /*collisio
                     soul.max_health = stats.health;
                     soul.health = stats.health;
                     soul.aggro_player = true;
+                    soul.is_awake = true;
                     targets_.push_back(soul);
                 }
+            }
+
+            const auto loot = map::monster_death_loot(target.monster_type);
+            if (loot != map::ItemType::None) {
+                const int drop_vel_x =
+                    (target.vel_x / 2) - 3 + static_cast<int>(target.id % 7);
+                const int drop_vel_y = (target.vel_y / 2) - static_cast<int>(target.id % 4);
+                items_.spawn_monster_drop(loot, center_x, center_y, drop_vel_x, drop_vel_y);
             }
         }
     }

@@ -14,6 +14,7 @@ inline constexpr std::uint16_t MOVE_HITLAND = 4;
 inline constexpr std::uint16_t MOVE_INWATER = 16;
 inline constexpr std::uint16_t MOVE_HITWATER = 32;
 inline constexpr std::uint16_t MOVE_HITAIR = 64;
+inline constexpr std::uint16_t MOVE_BLOCK = 128;
 
 struct RayHit {
     bool hit = false;
@@ -44,6 +45,8 @@ public:
 
     [[nodiscard]] std::uint16_t move_object(float& x, float& y, float width, float height, int dx,
                                             int dy, bool climb_slopes) const;
+    [[nodiscard]] std::uint16_t move_monster(float& x, float& y, float width, float height, int dx,
+                                             int dy, bool climb_slopes) const;
 
     /// Ray trace against solid panels (walls + closed doors). Distance along segment [0,1].
     [[nodiscard]] RayHit trace_solid_ray(float x0, float y0, float x1, float y1) const;
@@ -57,10 +60,13 @@ private:
     [[nodiscard]] bool stay_on_step(float x, float y, float width, float height) const;
     [[nodiscard]] bool can_move_y(float x, float y, float width, float height, int ystep) const;
     [[nodiscard]] bool move_axis_x(float& xtemp, float& ytemp, float width, float height, int xstep,
-                                   int ystep, std::uint16_t& state, bool climb_slopes) const;
+                                   int ystep, std::uint16_t& state, bool climb_slopes,
+                                   bool block_monsters) const;
     [[nodiscard]] bool move_axis_y(float& xtemp, float& ytemp, float width, float height, int xstep,
-                                   int ystep, std::uint16_t& state) const;
+                                   int ystep, std::uint16_t& state, bool block_monsters) const;
     [[nodiscard]] bool is_solid_panel(const map::MapPanel& panel, std::size_t panel_index) const;
+    [[nodiscard]] std::uint16_t move_body(float& x, float& y, float width, float height, int dx,
+                                          int dy, bool climb_slopes, bool block_monsters) const;
 
     std::vector<map::MapPanel> panels_;
 };

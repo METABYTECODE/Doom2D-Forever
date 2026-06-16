@@ -47,6 +47,9 @@ public:
 
     void tick(PlayerState& player, const MapCollision* collision, EventBus* events);
 
+    void spawn_monster_drop(map::ItemType type, float center_x, float center_y, int vel_x,
+                            int vel_y);
+
     [[nodiscard]] const std::vector<WorldItem>& items() const { return items_; }
     [[nodiscard]] const GameRules& rules() const { return rules_; }
 

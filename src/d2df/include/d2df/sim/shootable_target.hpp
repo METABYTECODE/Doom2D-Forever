@@ -33,6 +33,7 @@ struct ShootableTarget {
     int revive_ticks = 0;
     bool facing_left = false;
     bool aggro_player = false;
+    bool is_awake = false;
     bool in_water = false;
     bool death_handled = false;
     MonsterLifeState life_state = MonsterLifeState::Alive;

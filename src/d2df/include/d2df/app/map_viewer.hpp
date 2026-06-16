@@ -51,7 +51,7 @@ private:
     void draw_items(int viewport_w, int viewport_h);
     void draw_projectiles(int viewport_w, int viewport_h);
     void draw_hud(int viewport_w, int viewport_h);
-    void update_camera_follow();
+    void update_camera_follow(float render_alpha = 1.0f);
 
     SDL_Renderer* renderer_;
     std::filesystem::path content_root_;

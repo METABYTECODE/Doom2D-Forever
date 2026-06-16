@@ -9,10 +9,12 @@
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/map/map_catalog.hpp>
+#include <d2df/core/types.hpp>
 #include <d2df/map/item_types.hpp>
 #include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/monster_types.hpp>
 #include <d2df/sim/item_system.hpp>
+#include <d2df/sim/weapon_types.hpp>
 
 namespace d2df {
 namespace {
@@ -89,14 +91,83 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
     sound_.bind_assets(assets_);
     if (sound_.init()) {
         if (events_ != nullptr) {
-            events_->subscribe<events::ItemPickedUp>(
-                [this](const events::ItemPickedUp&) { sound_.play("sfx.world.getitem"); });
+            events_->subscribe<events::ItemPickedUp>([this](const events::ItemPickedUp& event) {
+                const auto item_type = static_cast<map::ItemType>(event.item_type);
+                if (const char* sfx = map::item_pickup_sfx(item_type)) {
+                    sound_.play(sfx);
+                }
+            });
             events_->subscribe<events::ItemRespawned>(
                 [this](const events::ItemRespawned&) { sound_.play("sfx.world.respawnitem"); });
             events_->subscribe<events::PlayerTeleported>(
                 [this](const events::PlayerTeleported& event) {
                     sound_.play(event.blocked ? "sfx.world.noteleport" : "sfx.world.teleport");
                 });
+            events_->subscribe<events::PlayerFired>([this](const events::PlayerFired& event) {
+                if (event.shooter_id != kPlayerEntityId) {
+                    return;
+                }
+                const auto weapon = static_cast<sim::WeaponId>(event.weapon);
+                if (const char* sfx = sim::weapon_fire_sfx(weapon)) {
+                    sound_.play(sfx);
+                }
+            });
+            events_->subscribe<events::MonsterDied>([this](const events::MonsterDied& event) {
+                const auto type = static_cast<map::MonsterType>(event.monster_type);
+                if (const char* sfx = map::monster_die_sfx(type)) {
+                    sound_.play(sfx);
+                }
+                if (type == map::MonsterType::Barrel) {
+                    sound_.play("sfx.world.exploderocket");
+                }
+            });
+            events_->subscribe<events::MonsterAlerted>([this](const events::MonsterAlerted& event) {
+                const auto type = static_cast<map::MonsterType>(event.monster_type);
+                if (const char* sfx = map::monster_alert_sfx(type, event.entity_id)) {
+                    sound_.play(sfx);
+                }
+            });
+            events_->subscribe<events::WorldDoorChanged>(
+                [this](const events::WorldDoorChanged& event) {
+                    switch (event.sound) {
+                    case events::DoorSound::Open:
+                        sound_.play("sfx.world.dooropen");
+                        break;
+                    case events::DoorSound::Close:
+                        sound_.play("sfx.world.doorclose");
+                        break;
+                    default:
+                        break;
+                    }
+                });
+            events_->subscribe<events::WorldSwitchActivated>(
+                [this](const events::WorldSwitchActivated&) {
+                    sound_.play("sfx.world.switch0");
+                });
+            events_->subscribe<events::WorldExplosion>([this](const events::WorldExplosion& event) {
+                switch (event.kind) {
+                case events::ExplosionKind::Bfg:
+                    sound_.play("sfx.world.explodebfg");
+                    break;
+                case events::ExplosionKind::Plasma:
+                    sound_.play("sfx.world.explodeplasma");
+                    break;
+                case events::ExplosionKind::Rocket:
+                default:
+                    sound_.play("sfx.world.exploderocket");
+                    break;
+                }
+            });
+            events_->subscribe<events::PlayerDamaged>([this](const events::PlayerDamaged& event) {
+                if (event.amount <= 0) {
+                    return;
+                }
+                if (event.source == events::DamageSource::Melee) {
+                    sound_.play("sfx.world.hitpunch");
+                } else {
+                    sound_.play("sfx.world.hit");
+                }
+            });
         }
     }
     map_list_ = map::list_map_json_files(content_root_);
@@ -362,14 +433,15 @@ void MapViewer::fixed_update() {
         }
         cycle_map(1);
     }
-
-    update_camera_follow();
 }
 
-void MapViewer::update_camera_follow() {
+void MapViewer::update_camera_follow(float render_alpha) {
+    if (free_camera_) {
+        return;
+    }
     const auto& player = world_.player();
-    camera_.center_x = player.x + player.width * 0.5f;
-    camera_.center_y = player.y + player.height * 0.5f;
+    camera_.center_x = player.render_x(render_alpha) + player.width * 0.5f;
+    camera_.center_y = player.render_y(render_alpha) + player.height * 0.5f;
 }
 
 void MapViewer::update(float frame_dt) {
@@ -618,8 +690,8 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
         }
 
         const float alpha = fixed_timestep_.render_alpha();
-        const float rx = target.render_x(alpha);
-        const float ry = target.render_y(alpha);
+        const float draw_hitbox_x = draw_corpse ? target.x : target.render_x(alpha);
+        const float draw_hitbox_y = draw_corpse ? target.y : target.render_y(alpha);
 
         map::MonsterSprite sprite{};
         if (target.is_monster()) {
@@ -644,18 +716,27 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
             if (tex_w > 0 && tex_h > 0) {
                 const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
                 const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
+                const int frames_in_texture =
+                    frame_w > 0 ? std::max(1, tex_w / frame_w) : 1;
+                const int frame_count = std::min(sprite.frame_count, frames_in_texture);
+
                 int frame_index = 0;
-                if (sprite.frame_count > 1 && sprite.anim_period > 0) {
-                    frame_index = (target.anim_tick / sprite.anim_period) % sprite.frame_count;
-                } else if (draw_corpse && sprite.frame_count > 1) {
-                    frame_index = sprite.frame_count - 1;
+                if (frame_count > 1 && sprite.anim_period > 0) {
+                    frame_index = (target.anim_tick / sprite.anim_period) % frame_count;
+                } else if (draw_corpse && frame_count > 1) {
+                    frame_index = frame_count - 1;
                 }
+
+                const auto placement = map::monster_sprite_placement(
+                    target.monster_type, draw_hitbox_x, draw_hitbox_y, target.width, sprite,
+                    target.facing_left);
 
                 int sprite_dst_x = 0;
                 int sprite_dst_y = 0;
                 int sprite_dst_w = 0;
                 int sprite_dst_h = 0;
-                camera_.world_rect_to_screen(rx, ry, static_cast<float>(frame_w),
+                camera_.world_rect_to_screen(placement.x, placement.y,
+                                             static_cast<float>(frame_w),
                                              static_cast<float>(frame_h), viewport_w, viewport_h,
                                              sprite_dst_x, sprite_dst_y, sprite_dst_w, sprite_dst_h);
 
@@ -665,7 +746,7 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
                     const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
                     const SDL_Rect sprite_dst{sprite_dst_x, sprite_dst_y, sprite_dst_w,
                                               sprite_dst_h};
-                    if (target.facing_left && sprite.texture_id_left == nullptr) {
+                    if (placement.flip_horizontal) {
                         SDL_RenderCopyEx(renderer_, texture, &src, &sprite_dst, 0.0, nullptr,
                                          SDL_FLIP_HORIZONTAL);
                     } else {
@@ -680,8 +761,8 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
         int dst_y = 0;
         int dst_w = 0;
         int dst_h = 0;
-        camera_.world_rect_to_screen(rx, ry, target.width, target.height, viewport_w, viewport_h,
-                                     dst_x, dst_y, dst_w, dst_h);
+        camera_.world_rect_to_screen(draw_hitbox_x, draw_hitbox_y, target.width, target.height,
+                                     viewport_w, viewport_h, dst_x, dst_y, dst_w, dst_h);
 
         if (target.is_monster()) {
             set_monster_draw_color(target.monster_type, renderer_);
@@ -748,6 +829,8 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
 }
 
 void MapViewer::render(int viewport_w, int viewport_h) {
+    update_camera_follow(fixed_timestep_.render_alpha());
+
     SDL_SetRenderDrawColor(renderer_, 20, 15, 26, 255);
     SDL_RenderClear(renderer_);
 
