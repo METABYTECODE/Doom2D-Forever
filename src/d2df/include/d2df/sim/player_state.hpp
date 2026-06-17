@@ -8,6 +8,12 @@ namespace d2df::sim {
 
 class MapCollision;
 
+enum class PlayerDeathPhase {
+    None,
+    Die1,
+    Die2,
+};
+
 struct PlayerInput {
     bool left = false;
     bool right = false;
@@ -76,11 +82,16 @@ struct PlayerState {
     [[nodiscard]] bool has_key_blue() const { return key_blue_; }
     [[nodiscard]] std::uint8_t key_mask() const;
     [[nodiscard]] int tick() const { return tick_; }
+    [[nodiscard]] int pain_ticks() const { return pain_ticks_; }
+    [[nodiscard]] PlayerDeathPhase death_phase() const { return death_phase_; }
     [[nodiscard]] float render_x(float alpha) const;
     [[nodiscard]] float render_y(float alpha) const;
 
     /// @return true if the player died from this hit.
     bool apply_damage(int amount);
+
+    void tick_corpse();
+    void reset_death_state();
 
     void restore_health();
     /// Raise health up to cap; returns false if already at or above cap.
@@ -138,6 +149,9 @@ private:
     bool on_lift_ = false;
     /// Legacy MoveButton: -1 = left, 0 = none, 1 = right. Unchanged while both keys held.
     int run_direction_ = 0;
+    int pain_ticks_ = 0;
+    PlayerDeathPhase death_phase_ = PlayerDeathPhase::None;
+    int death_started_tick_ = 0;
     PlayerCombat combat_;
 };
 

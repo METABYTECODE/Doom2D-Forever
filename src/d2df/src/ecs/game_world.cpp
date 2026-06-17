@@ -89,6 +89,8 @@ void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInpu
                              EventBus* events, int map_width, int map_height,
                              sim::TriggerSystem* triggers) {
     if (!player_.alive()) {
+        player_.tick_corpse();
+        sync_to_ecs();
         return;
     }
 

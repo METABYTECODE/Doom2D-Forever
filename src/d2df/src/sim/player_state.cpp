@@ -6,6 +6,7 @@
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/key_types.hpp>
 #include <d2df/sim/map_collision.hpp>
+#include <d2df/sim/player_types.hpp>
 
 namespace d2df::sim {
 namespace {
@@ -53,6 +54,7 @@ void PlayerState::reset_to_spawn(float spawn_x, float spawn_y) {
     air_ = kAirMax;
     jetpack_active_ = false;
     can_jetpack_ = false;
+    reset_death_state();
 }
 
 std::uint8_t PlayerState::key_mask() const {
@@ -128,6 +130,10 @@ bool PlayerState::apply_damage(int amount) {
         return false;
     }
 
+    if (amount >= 9) {
+        pain_ticks_ = kPlayerPainTicks;
+    }
+
     int remaining = amount;
     if (armor_ > 0) {
         const int absorbed = std::min(armor_, remaining);
@@ -140,7 +146,28 @@ bool PlayerState::apply_damage(int amount) {
     }
 
     health_ = std::max(0, health_ - remaining);
+    if (!alive()) {
+        pain_ticks_ = 0;
+        death_phase_ = PlayerDeathPhase::Die1;
+        death_started_tick_ = tick_;
+    }
     return !alive();
+}
+
+void PlayerState::tick_corpse() {
+    begin_tick();
+    ++tick_;
+
+    if (death_phase_ == PlayerDeathPhase::Die1 &&
+        tick_ - death_started_tick_ >= kPlayerDie1Ticks) {
+        death_phase_ = PlayerDeathPhase::Die2;
+    }
+}
+
+void PlayerState::reset_death_state() {
+    pain_ticks_ = 0;
+    death_phase_ = PlayerDeathPhase::None;
+    death_started_tick_ = 0;
 }
 
 void PlayerState::restore_health() {
@@ -277,6 +304,10 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
     const bool physics_tick = (tick_ % 2) == 0;
     ++tick_;
     on_lift_ = false;
+
+    if (pain_ticks_ > 0) {
+        --pain_ticks_;
+    }
 
     if (physics_tick) {
         update_movement_inputs(input.left, input.right);

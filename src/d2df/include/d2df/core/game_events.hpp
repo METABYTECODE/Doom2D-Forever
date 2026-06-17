@@ -95,6 +95,11 @@ struct WorldSmokePuff {
     float y = 0.f;
 };
 
+struct WorldBubblePuff {
+    float x = 0.f;
+    float y = 0.f;
+};
+
 struct ItemPickedUp {
     std::uint8_t item_type = 0;
 };

@@ -169,6 +169,8 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
             });
             events_->subscribe<events::WorldSmokePuff>(
                 [this](const events::WorldSmokePuff& event) { spawn_smoke_effect(event); });
+            events_->subscribe<events::WorldBubblePuff>(
+                [this](const events::WorldBubblePuff& event) { spawn_bubble_effect(event); });
             events_->subscribe<events::PlayerDamaged>([this](const events::PlayerDamaged& event) {
                 if (event.amount <= 0) {
                     return;
@@ -501,6 +503,70 @@ void MapViewer::draw_sky(int viewport_w, int viewport_h) {
     }
 }
 
+namespace {
+
+bool draw_player_layer(SDL_Renderer* renderer, render::TextureCache* textures,
+                       const render::Camera2D& camera, int viewport_w, int viewport_h,
+                       const char* texture_id, float world_x, float world_y, int frame_width,
+                       int frame_height, int frame_count, int frame_index, bool flip_horizontal,
+                       Uint8 alpha, bool colorize, std::uint8_t color_r, std::uint8_t color_g,
+                       std::uint8_t color_b) {
+    if (texture_id == nullptr || textures == nullptr) {
+        return false;
+    }
+
+    SDL_Texture* texture = textures->get(texture_id);
+    if (texture == nullptr) {
+        return false;
+    }
+
+    int tex_w = 0;
+    int tex_h = 0;
+    SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+    if (tex_w <= 0 || tex_h <= 0) {
+        return false;
+    }
+
+    const int resolved_frame_w = frame_width > 0 ? frame_width : tex_w;
+    const int resolved_frame_h = frame_height > 0 ? frame_height : tex_h;
+    const int frames_in_texture =
+        resolved_frame_w > 0 ? std::max(1, tex_w / resolved_frame_w) : 1;
+    const int resolved_frame_count = std::min(frame_count, frames_in_texture);
+    const int resolved_frame_index =
+        std::clamp(frame_index, 0, std::max(0, resolved_frame_count - 1));
+
+    int dst_x = 0;
+    int dst_y = 0;
+    int dst_w = 0;
+    int dst_h = 0;
+    camera.world_rect_to_screen(world_x, world_y, static_cast<float>(resolved_frame_w),
+                                static_cast<float>(resolved_frame_h), viewport_w, viewport_h,
+                                dst_x, dst_y, dst_w, dst_h);
+    if (dst_w <= 0 || dst_h <= 0) {
+        return false;
+    }
+
+    SDL_SetTextureAlphaMod(texture, alpha);
+    SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+    if (colorize) {
+        SDL_SetTextureColorMod(texture, color_r, color_g, color_b);
+    } else {
+        SDL_SetTextureColorMod(texture, 255, 255, 255);
+    }
+
+    const SDL_Rect src{resolved_frame_index * resolved_frame_w, 0, resolved_frame_w,
+                       resolved_frame_h};
+    const SDL_Rect dst{dst_x, dst_y, dst_w, dst_h};
+    if (flip_horizontal) {
+        SDL_RenderCopyEx(renderer, texture, &src, &dst, 0.0, nullptr, SDL_FLIP_HORIZONTAL);
+    } else {
+        SDL_RenderCopy(renderer, texture, &src, &dst);
+    }
+    return true;
+}
+
+} // namespace
+
 void MapViewer::draw_player(int viewport_w, int viewport_h) {
     if (free_camera_) {
         return;
@@ -515,55 +581,50 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
     const bool firing = combat.is_reloading(combat.current_weapon);
     const auto anim = sim::resolve_player_anim(
         player.on_ground(), player.vel_x, key_aim_up_, key_aim_down_, firing,
-        combat.current_weapon);
-    const auto sprite = sim::player_sprite(anim);
+        combat.current_weapon, player.pain_ticks(), player.death_phase());
+    const auto sprite_set = sim::player_sprite_set(anim);
     const auto placement =
         sim::player_sprite_placement(hitbox_x, hitbox_y, combat.facing_left);
+    const int frame_index =
+        sim::player_anim_frame_index(anim, player.tick(), player.vel_x);
+    const Uint8 draw_alpha = player.has_invis() ? 200 : 255;
+    const auto team_color = sim::default_player_team_color();
 
-    SDL_Texture* texture =
-        sprite.texture_id != nullptr ? textures_->get(sprite.texture_id) : nullptr;
-
-    if (texture != nullptr) {
-        int tex_w = 0;
-        int tex_h = 0;
-        SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
-        if (tex_w > 0 && tex_h > 0) {
-            const int frame_w = sprite.frame_width > 0 ? sprite.frame_width : tex_w;
-            const int frame_h = sprite.frame_height > 0 ? sprite.frame_height : tex_h;
-            const int frames_in_texture = frame_w > 0 ? std::max(1, tex_w / frame_w) : 1;
-            const int frame_count = std::min(sprite.frame_count, frames_in_texture);
-
-            int frame_index = 0;
-            if (anim == sim::PlayerAnim::Walk) {
-                frame_index = sim::player_walk_frame_index(player.tick(), player.vel_x);
-            } else if (frame_count > 1 && sprite.anim_period > 0) {
-                frame_index = (player.tick() / sprite.anim_period) % frame_count;
+    if (sim::should_draw_weapon(combat.current_weapon, anim)) {
+        if (const char* weapon_texture =
+                sim::player_weapon_texture_id(combat.current_weapon, anim, firing)) {
+            float weapon_x = placement.x;
+            float weapon_y = placement.y;
+            sim::PlayerWeaponDrawOffset weapon_offset{};
+            if (sim::player_weapon_draw_offset(combat.current_weapon, anim, frame_index,
+                                               combat.facing_left, weapon_offset)) {
+                weapon_x += weapon_offset.dx;
+                weapon_y += weapon_offset.dy;
             }
-            frame_index = std::clamp(frame_index, 0, std::max(0, frame_count - 1));
 
-            int sprite_dst_x = 0;
-            int sprite_dst_y = 0;
-            int sprite_dst_w = 0;
-            int sprite_dst_h = 0;
-            camera_.world_rect_to_screen(placement.x, placement.y, static_cast<float>(frame_w),
-                                         static_cast<float>(frame_h), viewport_w, viewport_h,
-                                         sprite_dst_x, sprite_dst_y, sprite_dst_w, sprite_dst_h);
-
-            if (sprite_dst_w > 0 && sprite_dst_h > 0) {
-                const Uint8 draw_alpha = player.has_invis() ? 200 : 255;
-                SDL_SetTextureAlphaMod(texture, draw_alpha);
-                SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
-                const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
-                const SDL_Rect sprite_dst{sprite_dst_x, sprite_dst_y, sprite_dst_w, sprite_dst_h};
-                if (placement.flip_horizontal) {
-                    SDL_RenderCopyEx(renderer_, texture, &src, &sprite_dst, 0.0, nullptr,
-                                     SDL_FLIP_HORIZONTAL);
-                } else {
-                    SDL_RenderCopy(renderer_, texture, &src, &sprite_dst);
-                }
-                return;
-            }
+            (void)draw_player_layer(renderer_, textures_.get(), camera_, viewport_w, viewport_h,
+                                    weapon_texture, weapon_x, weapon_y, 0, 0, 1, 0,
+                                    placement.flip_horizontal, draw_alpha, false, 255, 255, 255);
         }
+    }
+
+    const bool drew_body = draw_player_layer(
+        renderer_, textures_.get(), camera_, viewport_w, viewport_h, sprite_set.body.texture_id,
+        placement.x, placement.y, sprite_set.body.frame_width, sprite_set.body.frame_height,
+        sprite_set.body.frame_count, frame_index, placement.flip_horizontal, draw_alpha, false,
+        255, 255, 255);
+
+    if (drew_body && sprite_set.mask_texture_id != nullptr) {
+        (void)draw_player_layer(renderer_, textures_.get(), camera_, viewport_w, viewport_h,
+                                sprite_set.mask_texture_id, placement.x, placement.y,
+                                sprite_set.body.frame_width, sprite_set.body.frame_height,
+                                sprite_set.body.frame_count, frame_index,
+                                placement.flip_horizontal, draw_alpha, true, team_color.r,
+                                team_color.g, team_color.b);
+    }
+
+    if (drew_body) {
+        return;
     }
 
     int dst_x = 0;
@@ -948,6 +1009,16 @@ void MapViewer::spawn_smoke_effect(const events::WorldSmokePuff& event) {
     effects_.push_back(effect);
 }
 
+void MapViewer::spawn_bubble_effect(const events::WorldBubblePuff& event) {
+    WorldEffect effect;
+    effect.x = event.x;
+    effect.y = event.y;
+    effect.duration_ticks = 18;
+    effect.alpha = 180;
+    effect.bubble = true;
+    effects_.push_back(effect);
+}
+
 void MapViewer::tick_effects() {
     for (auto& effect : effects_) {
         ++effect.anim_tick;
@@ -966,6 +1037,24 @@ void MapViewer::draw_effects(int viewport_w, int viewport_h) {
     }
 
     for (const auto& effect : effects_) {
+        if (effect.bubble) {
+            int dst_x = 0;
+            int dst_y = 0;
+            int dst_w = 0;
+            int dst_h = 0;
+            camera_.world_rect_to_screen(effect.x, effect.y, 8.0f, 8.0f, viewport_w, viewport_h,
+                                         dst_x, dst_y, dst_w, dst_h);
+            if (dst_w <= 0 || dst_h <= 0) {
+                continue;
+            }
+
+            SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(renderer_, 220, 235, 255, effect.alpha);
+            const SDL_Rect bubble{dst_x, dst_y, dst_w, dst_h};
+            SDL_RenderFillRect(renderer_, &bubble);
+            continue;
+        }
+
         if (effect.sprite.texture_id == nullptr || textures_ == nullptr) {
             continue;
         }

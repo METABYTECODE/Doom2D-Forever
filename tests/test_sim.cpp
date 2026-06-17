@@ -2540,19 +2540,55 @@ TEST_CASE("player anim resolves stand walk aim and fire states", "[sim][player]"
     using sim::PlayerAnim;
     using sim::WeaponId;
 
-    CHECK(sim::resolve_player_anim(true, 0, false, false, false, WeaponId::Pistol) ==
-          PlayerAnim::Stand);
-    CHECK(sim::resolve_player_anim(true, 5, false, false, false, WeaponId::Pistol) ==
-          PlayerAnim::Walk);
-    CHECK(sim::resolve_player_anim(true, 0, true, false, false, WeaponId::Pistol) ==
-          PlayerAnim::SeeUp);
-    CHECK(sim::resolve_player_anim(true, 0, false, true, false, WeaponId::Pistol) ==
-          PlayerAnim::SeeDown);
-    CHECK(sim::resolve_player_anim(true, 0, false, false, true, WeaponId::Pistol) ==
-          PlayerAnim::Attack);
-    CHECK(sim::resolve_player_anim(true, 0, true, false, true, WeaponId::Pistol) ==
-          PlayerAnim::AttackUp);
-    CHECK(sim::resolve_player_anim(true, 0, false, false, true, WeaponId::Saw) == PlayerAnim::Stand);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, false, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::Stand);
+    CHECK(sim::resolve_player_anim(true, 5, false, false, false, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::Walk);
+    CHECK(sim::resolve_player_anim(true, 0, true, false, false, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::SeeUp);
+    CHECK(sim::resolve_player_anim(true, 0, false, true, false, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::SeeDown);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, true, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::Attack);
+    CHECK(sim::resolve_player_anim(true, 0, true, false, true, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::AttackUp);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, true, WeaponId::Saw, 0,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::Stand);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, false, WeaponId::Pistol, 12,
+                                   sim::PlayerDeathPhase::None) == PlayerAnim::Pain);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, false, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::Die1) == PlayerAnim::Die1);
+    CHECK(sim::resolve_player_anim(true, 0, false, false, false, WeaponId::Pistol, 0,
+                                   sim::PlayerDeathPhase::Die2) == PlayerAnim::Die2);
+
+    const auto stand_set = sim::player_sprite_set(PlayerAnim::Stand);
+    CHECK(std::string_view(stand_set.body.texture_id) == "tex.tile.stand");
+    CHECK(std::string_view(stand_set.mask_texture_id) == "tex.tile.standmask");
+
+    CHECK(std::string_view(sim::player_weapon_texture_id(WeaponId::Pistol, PlayerAnim::Attack,
+                                                         true)) == "tex.weapon.hgun_fire_2");
+    CHECK(std::string_view(sim::player_weapon_texture_id(WeaponId::Pistol, PlayerAnim::SeeUp,
+                                                         false)) == "tex.weapon.hgun_up_2");
+    CHECK(std::string_view(sim::player_weapon_texture_id(WeaponId::Pistol, PlayerAnim::Stand,
+                                                         false)) == "tex.weapon.hgun_2");
+    CHECK(std::string_view(sim::player_weapon_texture_id(WeaponId::Chaingun, PlayerAnim::Stand,
+                                                         false)) == "tex.weapon.mgun_3");
+    CHECK(sim::player_weapon_texture_id(WeaponId::Knuckles, PlayerAnim::Stand, false) == nullptr);
+    CHECK_FALSE(sim::should_draw_weapon(WeaponId::Knuckles, PlayerAnim::Stand));
+    CHECK_FALSE(sim::should_draw_weapon(WeaponId::Pistol, PlayerAnim::Pain));
+
+    sim::PlayerWeaponDrawOffset weapon_offset{};
+    CHECK(sim::player_weapon_draw_offset(WeaponId::Pistol, PlayerAnim::Stand, 0, false,
+                                         weapon_offset));
+    CHECK(weapon_offset.dx == 41.0f);
+    CHECK(weapon_offset.dy == 0.0f);
+    CHECK(sim::player_weapon_draw_offset(WeaponId::Pistol, PlayerAnim::Stand, 0, true,
+                                         weapon_offset));
+    CHECK(weapon_offset.dx == -41.0f);
+    CHECK(sim::player_weapon_draw_offset(WeaponId::Pistol, PlayerAnim::SeeDown, 0, false,
+                                         weapon_offset));
+    CHECK(weapon_offset.dx == 42.0f);
+    CHECK(weapon_offset.dy == 19.0f);
 
     CHECK(sim::player_walk_frame_index(0, 8) == 0);
     CHECK(sim::player_walk_frame_index(4, 8) == 2);
@@ -2607,4 +2643,26 @@ TEST_CASE("moonwalk keeps run direction while flipping facing", "[sim][player]")
 
     CHECK_FALSE(player.combat().facing_left);
     CHECK(player.vel_x < 0);
+}
+
+TEST_CASE("player pain and death states follow damage", "[sim][player]") {
+    sim::PlayerState player;
+
+    CHECK_FALSE(player.apply_damage(4));
+    CHECK(player.alive());
+    CHECK(player.pain_ticks() == 0);
+
+    CHECK_FALSE(player.apply_damage(10));
+    CHECK(player.alive());
+    CHECK(player.pain_ticks() == sim::kPlayerPainTicks);
+
+    CHECK(player.apply_damage(100));
+    CHECK_FALSE(player.alive());
+    CHECK(player.death_phase() == sim::PlayerDeathPhase::Die1);
+    CHECK(player.pain_ticks() == 0);
+
+    for (int i = 0; i < sim::kPlayerDie1Ticks; ++i) {
+        player.tick_corpse();
+    }
+    CHECK(player.death_phase() == sim::PlayerDeathPhase::Die2);
 }

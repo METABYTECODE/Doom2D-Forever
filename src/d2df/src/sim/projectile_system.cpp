@@ -187,16 +187,20 @@ void publish_rocket_smoke(EventBus* events, const Projectile& projectile, int mo
     if (projectile.kind != ProjectileKind::Rocket && projectile.kind != ProjectileKind::SkelFire) {
         return;
     }
-    if ((move_state & MOVE_INWATER) != 0) {
-        return;
-    }
 
     const float cx = projectile.x + projectile.width * 0.5f;
     const float cy = projectile.y + projectile.height * 0.5f;
     const int jitter_x = projectile.anim_tick % 9;
     const int jitter_y = (projectile.anim_tick * 3) % 9;
-    events->publish(events::WorldSmokePuff{cx + static_cast<float>(jitter_x),
-                                           cy + static_cast<float>(jitter_y)});
+    const float fx = cx + static_cast<float>(jitter_x);
+    const float fy = cy + static_cast<float>(jitter_y);
+
+    if ((move_state & MOVE_INWATER) != 0) {
+        events->publish(events::WorldBubblePuff{fx, fy});
+        return;
+    }
+
+    events->publish(events::WorldSmokePuff{fx, fy});
 }
 
 bool resolve_homing_aim(EntityId target_id, const PlayerState& player,

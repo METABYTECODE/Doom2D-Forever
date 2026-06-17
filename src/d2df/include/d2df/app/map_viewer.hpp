@@ -43,6 +43,7 @@ struct WorldEffect {
     int anim_tick = 0;
     int duration_ticks = 0;
     std::uint8_t alpha = 255;
+    bool bubble = false;
 };
 
 class MapViewer {
@@ -77,6 +78,7 @@ private:
     void tick_effects();
     void spawn_explosion_effect(const events::WorldExplosion& event);
     void spawn_smoke_effect(const events::WorldSmokePuff& event);
+    void spawn_bubble_effect(const events::WorldBubblePuff& event);
     void draw_hud(int viewport_w, int viewport_h);
     void update_camera_follow(float render_alpha = 1.0f);
 
