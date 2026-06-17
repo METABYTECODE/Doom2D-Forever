@@ -634,6 +634,32 @@ TEST_CASE("exit trigger requests map change", "[sim]") {
     CHECK_FALSE(triggers.consume_exit_request());
 }
 
+TEST_CASE("secret trigger publishes SecretFound and disables itself", "[sim]") {
+    map::MapDocument doc;
+
+    doc.triggers.push_back(map::MapTrigger{});
+    auto& secret = doc.triggers.back();
+    secret.type = map::TriggerType::Secret;
+    secret.position = {0, 0};
+    secret.size = {32, 32};
+    secret.activate = map::ActivateType::PlayerCollide;
+
+    sim::TriggerSystem triggers;
+    triggers.reset(doc);
+
+    d2df::EventBus bus;
+    int secret_count = 0;
+    bus.subscribe<events::SecretFound>([&](const events::SecretFound&) { ++secret_count; });
+
+    sim::PlayerState player;
+    player.snap_to(4.0f, 4.0f);
+    triggers.update(player, false, &bus);
+
+    CHECK(secret_count == 1);
+    triggers.update(player, false, &bus);
+    CHECK(secret_count == 1);
+}
+
 TEST_CASE("GameWorld publishes PlayerLanded on ground contact", "[sim]") {
     map::MapDocument doc;
     doc.size = {256, 256};

@@ -665,6 +665,12 @@ void TriggerSystem::activate_trigger(std::size_t trigger_index, PlayerState& pla
             publish_switch_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger));
         }
         break;
+    case map::TriggerType::Secret:
+        if (events != nullptr) {
+            events->publish(events::SecretFound{});
+        }
+        triggers_[trigger_index].enabled = false;
+        break;
     case map::TriggerType::Press:
     case map::TriggerType::On:
     case map::TriggerType::Off:

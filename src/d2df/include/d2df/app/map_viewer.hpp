@@ -93,7 +93,11 @@ private:
     void draw_hud(int viewport_w, int viewport_h);
     void draw_player_overlays(int viewport_w, int viewport_h);
     void draw_pause_menu(int viewport_w, int viewport_h);
+    void draw_intermission(int viewport_w, int viewport_h);
     void draw_perf_overlay(int viewport_w, int viewport_h);
+    void begin_intermission();
+    void finish_intermission();
+    void reset_session_stats();
     void update_camera_follow(float render_alpha = 1.0f);
     void clear_input_state();
     void handle_pause_key_down(int sym, SDL_Scancode scancode);
@@ -102,6 +106,22 @@ private:
     void load_quicksave();
     [[nodiscard]] std::filesystem::path quicksave_path() const;
     [[nodiscard]] std::string current_map_rel_path() const;
+
+    enum class SessionView {
+        Playing,
+        Intermission,
+    };
+
+    struct MapSessionStats {
+        int monsters_total = 0;
+        int kills = 0;
+        int secrets_total = 0;
+        int secrets_found = 0;
+        int elapsed_ticks = 0;
+    };
+
+    SessionView session_view_ = SessionView::Playing;
+    MapSessionStats session_stats_;
 
     SDL_Renderer* renderer_;
     std::filesystem::path content_root_;

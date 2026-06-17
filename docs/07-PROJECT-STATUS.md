@@ -277,7 +277,7 @@ REM или: build\src\d2df_client\Release\d2df.exe --map assets\content\maps\doo
 
 Combat (weapons, projectiles, monster AI), world sim (items, triggers, corpses), HUD, pause menu, SFX/music playback, player sprites/death.
 
-Отложено в Phase 7: консоль, content fonts, scoreboard.
+Отложено / исключено: консоль, CVars, scoreboard, bots, COOP, MP.
 
 ---
 
@@ -289,6 +289,7 @@ Combat (weapons, projectiles, monster AI), world sim (items, triggers, corpses),
 | **Performance profiling** (FPS, region timings) | ✅ |
 | **Resource audit** (textures/audio counts, shutdown log) | ✅ |
 | **Main menu** (New game / map select) | ✅ |
+| SP intermission + secret triggers | ✅ |
 | Viewport culling (panels, entities, HUD text cache) | ✅ |
 | Panel layer index at map load | ✅ |
 | Bots / local COOP | ⏸ отложено (сетевой rewrite) |

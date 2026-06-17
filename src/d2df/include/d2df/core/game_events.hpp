@@ -45,6 +45,8 @@ struct PlayerDied {
 
 struct MapExitRequested {};
 
+struct SecretFound {};
+
 struct PlayerFired {
     EntityId shooter_id = 0;
     std::uint8_t weapon = 0;

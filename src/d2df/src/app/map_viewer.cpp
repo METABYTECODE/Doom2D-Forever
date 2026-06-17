@@ -22,6 +22,7 @@
 #include <d2df/map/item_types.hpp>
 #include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/monster_types.hpp>
+#include <d2df/map/trigger_types.hpp>
 #include <d2df/sim/item_system.hpp>
 #include <d2df/sim/effect_types.hpp>
 #include <d2df/sim/game_save.hpp>
@@ -149,12 +150,19 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
             });
             events_->subscribe<events::MonsterDied>([this](const events::MonsterDied& event) {
                 const auto type = static_cast<map::MonsterType>(event.monster_type);
+                if (type != map::MonsterType::Barrel) {
+                    ++session_stats_.kills;
+                }
                 if (const char* sfx = map::monster_die_sfx(type)) {
                     sound_.play(sfx);
                 }
                 if (type == map::MonsterType::Barrel) {
                     sound_.play("sfx.world.exploderocket");
                 }
+            });
+            events_->subscribe<events::SecretFound>([this](const events::SecretFound&) {
+                ++session_stats_.secrets_found;
+                sound_.play("sfx.world.secret");
             });
             events_->subscribe<events::MonsterAlerted>([this](const events::MonsterAlerted& event) {
                 const auto type = static_cast<map::MonsterType>(event.monster_type);
@@ -269,6 +277,8 @@ void MapViewer::load_map(const std::filesystem::path& map_path) {
 
     effects_.clear();
     continuous_sfx_.reset();
+    session_view_ = SessionView::Playing;
+    reset_session_stats();
 
     spdlog::info("Map [{}/{}]: {} ({}x{}, {} panels, {} areas)", map_index_ + 1,
                  map_list_.size(), map_.name, map_.size.width, map_.size.height, map_.panels.size(),
@@ -301,6 +311,35 @@ void MapViewer::cycle_map(int direction) {
                          ex.what());
         }
     } while (map_index_ != start_index);
+}
+
+void MapViewer::reset_session_stats() {
+    session_stats_ = {};
+    for (const auto& monster : map_.monsters) {
+        if (monster.type != map::MonsterType::None) {
+            ++session_stats_.monsters_total;
+        }
+    }
+    for (const auto& trigger : map_.triggers) {
+        if (trigger.type == map::TriggerType::Secret) {
+            ++session_stats_.secrets_total;
+        }
+    }
+}
+
+void MapViewer::begin_intermission() {
+    session_view_ = SessionView::Intermission;
+    paused_ = false;
+    clear_input_state();
+    continuous_sfx_.reset();
+    if (sound_.enabled()) {
+        sound_.play_music("music.intermus");
+    }
+}
+
+void MapViewer::finish_intermission() {
+    session_view_ = SessionView::Playing;
+    cycle_map(1);
 }
 
 void MapViewer::clear_input_state() {
@@ -489,6 +528,13 @@ void MapViewer::handle_pause_key_down(int sym, SDL_Scancode scancode) {
 }
 
 void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
+    if (session_view_ == SessionView::Intermission) {
+        if (scancode == SDL_SCANCODE_RETURN || scancode == SDL_SCANCODE_SPACE) {
+            finish_intermission();
+        }
+        return;
+    }
+
     if (paused_) {
         handle_pause_key_down(sym, scancode);
         return;
@@ -659,6 +705,9 @@ void MapViewer::handle_mouse_wheel(int y) {
 
 void MapViewer::fixed_update() {
     core::ScopedPerfRegion sim_scope(core::PerfRegion::SimFixed);
+    if (session_view_ == SessionView::Intermission) {
+        return;
+    }
     if (free_camera_) {
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         float dx = 0.0f;
@@ -715,6 +764,8 @@ void MapViewer::fixed_update() {
     }
     key_use_edge_ = false;
 
+    ++session_stats_.elapsed_ticks;
+
     continuous_sfx_.tick(world_.player(), world_.player().combat(), fire_held);
 
     if (world_.player().ready_to_respawn()) {
@@ -726,7 +777,7 @@ void MapViewer::fixed_update() {
         if (events_ != nullptr) {
             events_->publish(events::MapExitRequested{});
         }
-        cycle_map(1);
+        begin_intermission();
     }
 
     if (save_status_ticks_ > 0) {
@@ -768,7 +819,7 @@ void MapViewer::update_camera_follow(float render_alpha) {
 
 void MapViewer::update(float frame_dt) {
     core::ScopedPerfRegion update_scope(core::PerfRegion::MapUpdate);
-    if (paused_) {
+    if (paused_ || session_view_ == SessionView::Intermission) {
         return;
     }
     fixed_timestep_.advance(frame_dt);
@@ -1680,6 +1731,67 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
     }
 }
 
+void MapViewer::draw_intermission(int viewport_w, int viewport_h) {
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
+    SDL_RenderClear(renderer_);
+
+    if (SDL_Texture* inter = textures_->get("tex.ui.inter")) {
+        int tex_w = 0;
+        int tex_h = 0;
+        SDL_QueryTexture(inter, nullptr, nullptr, &tex_w, &tex_h);
+        if (tex_w > 0 && tex_h > 0) {
+            const float scale =
+                std::min(static_cast<float>(viewport_w) / static_cast<float>(tex_w),
+                         static_cast<float>(viewport_h) / static_cast<float>(tex_h));
+            const int dst_w = static_cast<int>(tex_w * scale);
+            const int dst_h = static_cast<int>(tex_h * scale);
+            const SDL_Rect dst{(viewport_w - dst_w) / 2, (viewport_h - dst_h) / 2, dst_w, dst_h};
+            SDL_SetTextureAlphaMod(inter, 255);
+            SDL_SetTextureBlendMode(inter, SDL_BLENDMODE_BLEND);
+            SDL_RenderCopy(renderer_, inter, nullptr, &dst);
+        }
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 120);
+    const SDL_Rect shade{0, 0, viewport_w, viewport_h};
+    SDL_RenderFillRect(renderer_, &shade);
+
+    const int line_height = 22;
+    const int panel_y = viewport_h / 2 - 60;
+    const std::string title = map_.name.empty() ? "LEVEL COMPLETE" : map_.name;
+    text_.draw(renderer_, title, viewport_w / 2 - text_.measure_width(title) / 2, panel_y, 255,
+               220, 120);
+
+    const int total_seconds =
+        session_stats_.elapsed_ticks / sim::PlayerState::kTicksPerSecond;
+    const int minutes = total_seconds / 60;
+    const int seconds = total_seconds % 60;
+    const std::string time_line =
+        "Time  " + std::to_string(minutes) + ":" +
+        (seconds < 10 ? "0" : "") + std::to_string(seconds);
+    const std::string kills_line =
+        "Kills " + std::to_string(session_stats_.kills) + " / " +
+        std::to_string(session_stats_.monsters_total);
+    const std::string secrets_line =
+        "Secrets " + std::to_string(session_stats_.secrets_found) + " / " +
+        std::to_string(session_stats_.secrets_total);
+
+    int y = panel_y + 32;
+    text_.draw(renderer_, kills_line, viewport_w / 2 - text_.measure_width(kills_line) / 2, y,
+               220, 220, 230);
+    y += line_height;
+    text_.draw(renderer_, secrets_line, viewport_w / 2 - text_.measure_width(secrets_line) / 2, y,
+               220, 220, 230);
+    y += line_height;
+    text_.draw(renderer_, time_line, viewport_w / 2 - text_.measure_width(time_line) / 2, y, 220,
+               220, 230);
+
+    const char* hint = "Press Enter to continue";
+    text_.draw(renderer_, hint, viewport_w / 2 - text_.measure_width(hint) / 2, y + 36, 150, 150,
+               160);
+}
+
 void MapViewer::draw_pause_menu(int viewport_w, int viewport_h) {
     SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 170);
@@ -1755,6 +1867,11 @@ void MapViewer::draw_perf_overlay(int viewport_w, int /*viewport_h*/) {
 }
 
 void MapViewer::render(int viewport_w, int viewport_h) {
+    if (session_view_ == SessionView::Intermission) {
+        draw_intermission(viewport_w, viewport_h);
+        return;
+    }
+
     core::ScopedPerfRegion render_scope(core::PerfRegion::MapRender);
     update_camera_follow(fixed_timestep_.render_alpha());
 
