@@ -51,6 +51,11 @@ public:
     [[nodiscard]] const std::vector<PlayerCorpse>& corpses() const { return corpses_; }
     [[nodiscard]] const std::vector<PlayerGib>& gibs() const { return gibs_; }
 
+    /// Corpse spawned for the most recent player death (not the oldest on the map).
+    [[nodiscard]] const PlayerCorpse* tracked_corpse() const;
+    /// Centroid of gibs from the most recent gib death; returns active count in out_count.
+    void tracked_gib_centroid(float render_alpha, float& out_x, float& out_y, int& out_count) const;
+
 private:
     void spawn_corpse(const PlayerState& player);
     void spawn_gibs(float center_x, float center_y, int base_vel_x, int base_vel_y);
@@ -60,6 +65,9 @@ private:
 
     std::vector<PlayerCorpse> corpses_;
     std::vector<PlayerGib> gibs_;
+    int tracked_corpse_index_ = -1;
+    int tracked_gib_start_ = -1;
+    int tracked_gib_count_ = 0;
 };
 
 } // namespace d2df::sim

@@ -7,44 +7,58 @@
 #include <d2df/map/panel_types.hpp>
 
 namespace d2df::render {
-namespace {
-
-constexpr std::uint16_t kLayerOrder[] = {
-    map::PANEL_BACK,
-    map::PANEL_STEP,
-    map::PANEL_WALL,
-    map::PANEL_CLOSEDOOR,
-    map::PANEL_OPENDOOR,
-    map::PANEL_ACID1,
-    map::PANEL_ACID2,
-    map::PANEL_WATER,
-    map::PANEL_FORE,
-};
-
-} // namespace
 
 void MapRenderer::draw(SDL_Renderer* renderer, const map::MapDocument& document,
                        TextureCache& textures, const Camera2D& camera, int viewport_w,
-                       int viewport_h) const {
-    for (const auto layer : kLayerOrder) {
-        draw_layer(renderer, document, textures, camera, viewport_w, viewport_h, layer);
+                       int viewport_h, const MapRenderIndex* panel_index) const {
+    for (std::size_t layer_index = 0; layer_index < MapRenderIndex::kLayerCount; ++layer_index) {
+        const std::vector<std::size_t>* indices = nullptr;
+        if (panel_index != nullptr) {
+            indices = &panel_index->layer_panels(layer_index);
+        }
+        draw_layer(renderer, document, textures, camera, viewport_w, viewport_h,
+                   MapRenderIndex::layer_mask(layer_index), indices);
     }
 }
 
 void MapRenderer::draw_layer(SDL_Renderer* renderer, const map::MapDocument& document,
                              TextureCache& textures, const Camera2D& camera, int viewport_w,
-                             int viewport_h, std::uint16_t mask) const {
+                             int viewport_h, std::uint16_t mask,
+                             const std::vector<std::size_t>* panel_indices) const {
+    const auto draw_one = [&](const map::MapPanel& panel) {
+        if ((panel.type & mask) == 0) {
+            return;
+        }
+        if ((panel.type & (map::PANEL_CLOSEDOOR | map::PANEL_OPENDOOR)) != 0 && !panel.enabled) {
+            return;
+        }
+
+        const float panel_x = static_cast<float>(panel.position.x);
+        const float panel_y = static_cast<float>(panel.position.y);
+        const float panel_w = static_cast<float>(panel.size.width);
+        const float panel_h = static_cast<float>(panel.size.height);
+        if (!camera.world_rect_in_view(panel_x, panel_y, panel_w, panel_h, viewport_w, viewport_h)) {
+            return;
+        }
+
+        draw_panel(renderer, document, textures, camera, viewport_w, viewport_h, panel);
+    };
+
+    if (panel_indices != nullptr) {
+        for (const std::size_t panel_index : *panel_indices) {
+            if (panel_index >= document.panels.size()) {
+                continue;
+            }
+            draw_one(document.panels[panel_index]);
+        }
+        return;
+    }
+
     for (const auto& panel : document.panels) {
         if ((panel.flags & map::PANEL_FLAG_HIDE) != 0) {
             continue;
         }
-        if ((panel.type & mask) == 0) {
-            continue;
-        }
-        if ((panel.type & (map::PANEL_CLOSEDOOR | map::PANEL_OPENDOOR)) != 0 && !panel.enabled) {
-            continue;
-        }
-        draw_panel(renderer, document, textures, camera, viewport_w, viewport_h, panel);
+        draw_one(panel);
     }
 }
 
@@ -62,7 +76,9 @@ void MapRenderer::draw_panel(SDL_Renderer* renderer, const map::MapDocument& doc
 
     int tex_w = 0;
     int tex_h = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+    if (!textures.query_size(texture, tex_w, tex_h)) {
+        SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+    }
     if (tex_w <= 0 || tex_h <= 0) {
         return;
     }
@@ -85,6 +101,13 @@ void MapRenderer::draw_panel(SDL_Renderer* renderer, const map::MapDocument& doc
         const int tile_h = std::min(tex_h, panel_h - oy);
         for (int ox = 0; ox < panel_w; ox += tex_w) {
             const int tile_w = std::min(tex_w, panel_w - ox);
+
+            if (!camera.world_rect_in_view(static_cast<float>(panel.position.x + ox),
+                                           static_cast<float>(panel.position.y + oy),
+                                           static_cast<float>(tile_w), static_cast<float>(tile_h),
+                                           viewport_w, viewport_h)) {
+                continue;
+            }
 
             int dst_x = 0;
             int dst_y = 0;

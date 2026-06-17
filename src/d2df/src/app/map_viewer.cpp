@@ -28,6 +28,7 @@
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/projectile_types.hpp>
 #include <d2df/sim/player_corpse_system.hpp>
+#include <d2df/sim/player_state.hpp>
 #include <d2df/sim/player_types.hpp>
 #include <d2df/sim/weapon_types.hpp>
 #include <d2df/render/hud_layout.hpp>
@@ -255,6 +256,7 @@ void MapViewer::load_map(const std::filesystem::path& map_path) {
     current_map_path_ = map_path;
     map_ = map::load_map_json_v1(map_path);
     textures_ = std::make_unique<render::TextureCache>(renderer_, assets_);
+    map_render_index_.build(map_);
     triggers_.reset(map_);
     collision_.build_from_panels(triggers_.panels());
     world_.reset_player(map_);
@@ -328,6 +330,12 @@ bool MapViewer::consume_quit_request() {
     return requested;
 }
 
+bool MapViewer::consume_return_to_main_menu_request() {
+    const bool requested = return_to_main_menu_requested_;
+    return_to_main_menu_requested_ = false;
+    return requested;
+}
+
 void MapViewer::activate_pause_selection() {
     switch (pause_selection_) {
     case 0:
@@ -348,7 +356,8 @@ void MapViewer::activate_pause_selection() {
         cycle_map(1);
         break;
     case 5:
-        quit_requested_ = true;
+        paused_ = false;
+        return_to_main_menu_requested_ = true;
         break;
     default:
         break;
@@ -733,12 +742,10 @@ void MapViewer::update_camera_follow(float render_alpha) {
     }
     const auto& player = world_.player();
     if (!player.alive() && player.corpse_resolved()) {
-        for (const auto& corpse : world_.player_corpses().corpses()) {
-            if (!corpse.active) {
-                continue;
-            }
-            const float corpse_x = corpse.prev_x + (corpse.x - corpse.prev_x) * render_alpha;
-            const float corpse_y = corpse.prev_y + (corpse.y - corpse.prev_y) * render_alpha;
+        const auto& corpse_system = world_.player_corpses();
+        if (const sim::PlayerCorpse* corpse = corpse_system.tracked_corpse()) {
+            const float corpse_x = corpse->prev_x + (corpse->x - corpse->prev_x) * render_alpha;
+            const float corpse_y = corpse->prev_y + (corpse->y - corpse->prev_y) * render_alpha;
             camera_.center_x = corpse_x + player.width * 0.5f;
             camera_.center_y = corpse_y + player.height * 0.5f;
             return;
@@ -747,17 +754,10 @@ void MapViewer::update_camera_follow(float render_alpha) {
         float gib_x = 0.0f;
         float gib_y = 0.0f;
         int active_gibs = 0;
-        for (const auto& gib : world_.player_corpses().gibs()) {
-            if (!gib.active) {
-                continue;
-            }
-            gib_x += gib.prev_x + (gib.x - gib.prev_x) * render_alpha;
-            gib_y += gib.prev_y + (gib.y - gib.prev_y) * render_alpha;
-            ++active_gibs;
-        }
+        corpse_system.tracked_gib_centroid(render_alpha, gib_x, gib_y, active_gibs);
         if (active_gibs > 0) {
-            camera_.center_x = gib_x / static_cast<float>(active_gibs);
-            camera_.center_y = gib_y / static_cast<float>(active_gibs);
+            camera_.center_x = gib_x;
+            camera_.center_y = gib_y;
             return;
         }
     }
@@ -1013,6 +1013,10 @@ void MapViewer::draw_player_corpses(int viewport_w, int viewport_h) {
 
         const float hitbox_x = corpse.prev_x + (corpse.x - corpse.prev_x) * alpha;
         const float hitbox_y = corpse.prev_y + (corpse.y - corpse.prev_y) * alpha;
+        if (!camera_.world_rect_in_view(hitbox_x, hitbox_y, sim::PlayerState::width,
+                                        sim::PlayerState::height, viewport_w, viewport_h)) {
+            continue;
+        }
         const auto draw = sim::player_corpse_draw(corpse.mess);
         const auto sprite_set = sim::player_sprite_set(draw.anim);
         const auto placement =
@@ -1047,6 +1051,11 @@ void MapViewer::draw_player_corpses(int viewport_w, int viewport_h) {
 
         const float px = gib.prev_x + (gib.x - gib.prev_x) * alpha;
         const float py = gib.prev_y + (gib.y - gib.prev_y) * alpha;
+        if (!camera_.world_rect_in_view(px, py, static_cast<float>(sim::kPlayerGibFrameSize),
+                                        static_cast<float>(sim::kPlayerGibFrameSize), viewport_w,
+                                        viewport_h)) {
+            continue;
+        }
 
         int dst_x = 0;
         int dst_y = 0;
@@ -1096,6 +1105,12 @@ void MapViewer::draw_projectiles(int viewport_w, int viewport_h) {
                          sprite.draw_offset_x;
         const float py = projectile.prev_y + (projectile.y - projectile.prev_y) * alpha +
                          sprite.draw_offset_y;
+
+        if (!camera_.world_rect_in_view(px, py, static_cast<float>(sprite.frame_width),
+                                        static_cast<float>(sprite.frame_height), viewport_w,
+                                        viewport_h, 32.0f)) {
+            continue;
+        }
 
         SDL_Texture* texture =
             sprite.texture_id != nullptr ? textures_->get(sprite.texture_id) : nullptr;
@@ -1193,6 +1208,10 @@ void MapViewer::draw_items(int viewport_w, int viewport_h, bool monster_drops_on
             continue;
         }
         if (!item.active && item.respawn_anim_tick <= 0) {
+            continue;
+        }
+        if (!camera_.world_rect_in_view(item.x, item.y, item.width, item.height, viewport_w,
+                                        viewport_h, 48.0f)) {
             continue;
         }
 
@@ -1325,6 +1344,10 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
         const float alpha = fixed_timestep_.render_alpha();
         const float draw_hitbox_x = draw_corpse ? target.x : target.render_x(alpha);
         const float draw_hitbox_y = draw_corpse ? target.y : target.render_y(alpha);
+        if (!camera_.world_rect_in_view(draw_hitbox_x, draw_hitbox_y, target.width, target.height,
+                                        viewport_w, viewport_h, 64.0f)) {
+            continue;
+        }
 
         map::MonsterSprite sprite{};
         if (target.is_monster()) {
@@ -1669,7 +1692,7 @@ void MapViewer::draw_pause_menu(int viewport_w, int viewport_h) {
         "Load game",
         "Previous map",
         "Next map",
-        "Quit game",
+        "Main menu",
     };
     static constexpr int kItemCount = 6;
 
@@ -1744,7 +1767,7 @@ void MapViewer::render(int viewport_w, int viewport_h) {
         core::ScopedPerfRegion world_scope(core::PerfRegion::MapRenderWorld);
         draw_sky(game_w, viewport_h);
         map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, game_w,
-                           viewport_h);
+                             viewport_h, &map_render_index_);
         draw_items(game_w, viewport_h, false);
         draw_player(game_w, viewport_h);
         draw_player_corpses(game_w, viewport_h);

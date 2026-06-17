@@ -138,6 +138,7 @@ add_library(d2df_render STATIC
     src/render/camera2d.cpp
     src/render/hud_layout.cpp
     src/render/map_renderer.cpp
+    src/render/map_render_index.cpp
     src/render/text_renderer.cpp
     src/render/texture_cache.cpp
 )
@@ -222,6 +223,7 @@ endif()
 add_library(d2df_app STATIC
     src/app/content_paths.cpp
     src/app/game_app.cpp
+    src/app/main_menu.cpp
     src/app/map_viewer.cpp
 )
 

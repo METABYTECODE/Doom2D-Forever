@@ -43,4 +43,26 @@ void Camera2D::world_rect_to_screen(float world_x, float world_y, float world_w,
     out_h = static_cast<int>(std::lround(world_h * scale_f));
 }
 
+bool Camera2D::world_rect_in_view(float world_x, float world_y, float world_w, float world_h,
+                                  int viewport_w, int viewport_h, float margin_world) const {
+    const float scale_f = static_cast<float>(scale);
+    const float half_w =
+        static_cast<float>(viewport_w) / (scale_f * 2.0f) + margin_world;
+    const float half_h =
+        static_cast<float>(viewport_h) / (scale_f * 2.0f) + margin_world;
+
+    const float view_min_x = center_x - half_w;
+    const float view_max_x = center_x + half_w;
+    const float view_min_y = center_y - half_h;
+    const float view_max_y = center_y + half_h;
+
+    const float panel_min_x = world_x;
+    const float panel_min_y = world_y;
+    const float panel_max_x = world_x + world_w;
+    const float panel_max_y = world_y + world_h;
+
+    return panel_max_x >= view_min_x && panel_min_x <= view_max_x &&
+           panel_max_y >= view_min_y && panel_min_y <= view_max_y;
+}
+
 } // namespace d2df::render

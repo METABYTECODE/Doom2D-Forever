@@ -22,6 +22,7 @@ TextRenderer::TextRenderer() {
 }
 
 TextRenderer::~TextRenderer() {
+    clear_cache();
     if (font_ != nullptr) {
         TTF_CloseFont(font_);
         font_ = nullptr;
@@ -64,6 +65,64 @@ bool TextRenderer::init(const std::filesystem::path& content_root) {
     return false;
 }
 
+void TextRenderer::clear_cache() {
+    for (const auto& [_, entry] : cache_) {
+        if (entry.texture != nullptr) {
+            SDL_DestroyTexture(entry.texture);
+        }
+    }
+    cache_.clear();
+    cache_renderer_ = nullptr;
+}
+
+std::string TextRenderer::cache_key(std::string_view text, std::uint8_t r, std::uint8_t g,
+                                    std::uint8_t b) const {
+    return std::string(text) + ":" + std::to_string(r) + ":" + std::to_string(g) + ":" +
+           std::to_string(b);
+}
+
+const TextRenderer::TextCacheEntry* TextRenderer::find_cached(SDL_Renderer* renderer,
+                                                              std::string_view text,
+                                                              std::uint8_t r, std::uint8_t g,
+                                                              std::uint8_t b) const {
+    if (renderer != cache_renderer_) {
+        return nullptr;
+    }
+    const auto it = cache_.find(cache_key(text, r, g, b));
+    if (it == cache_.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+const TextRenderer::TextCacheEntry& TextRenderer::cache_text(SDL_Renderer* renderer,
+                                                             std::string_view text,
+                                                             std::uint8_t r, std::uint8_t g,
+                                                             std::uint8_t b) {
+    if (renderer != cache_renderer_) {
+        clear_cache();
+        cache_renderer_ = renderer;
+    }
+
+    const std::string key = cache_key(text, r, g, b);
+    if (const auto it = cache_.find(key); it != cache_.end()) {
+        return it->second;
+    }
+
+    TextCacheEntry entry;
+    const SDL_Color color{r, g, b, 255};
+    SDL_Surface* surface = TTF_RenderUTF8_Blended(font_, std::string(text).c_str(), color);
+    if (surface != nullptr) {
+        entry.texture = SDL_CreateTextureFromSurface(renderer, surface);
+        entry.width = surface->w;
+        entry.height = surface->h;
+        SDL_FreeSurface(surface);
+    }
+
+    auto [inserted, _] = cache_.emplace(key, entry);
+    return inserted->second;
+}
+
 int TextRenderer::measure_width(std::string_view text) const {
     if (font_ == nullptr || text.empty()) {
         return 0;
@@ -78,35 +137,26 @@ int TextRenderer::measure_width(std::string_view text) const {
 }
 
 void TextRenderer::draw_right(SDL_Renderer* renderer, std::string_view text, int right_x, int y,
-                              std::uint8_t r, std::uint8_t g, std::uint8_t b) const {
+                              std::uint8_t r, std::uint8_t g, std::uint8_t b) {
     const int width = measure_width(text);
     draw(renderer, text, right_x - width, y, r, g, b);
 }
 
 void TextRenderer::draw(SDL_Renderer* renderer, std::string_view text, int x, int y,
-                        std::uint8_t r, std::uint8_t g, std::uint8_t b) const {
+                        std::uint8_t r, std::uint8_t g, std::uint8_t b) {
     if (font_ == nullptr || text.empty()) {
         return;
     }
 
-    const SDL_Color color{r, g, b, 255};
-    SDL_Surface* surface = TTF_RenderUTF8_Blended(font_, std::string(text).c_str(), color);
-    if (surface == nullptr) {
+    const TextCacheEntry* cached = find_cached(renderer, text, r, g, b);
+    const TextCacheEntry& entry =
+        cached != nullptr ? *cached : cache_text(renderer, text, r, g, b);
+    if (entry.texture == nullptr) {
         return;
     }
 
-    SDL_Texture* texture = SDL_CreateTextureFromSurface(renderer, surface);
-    SDL_FreeSurface(surface);
-    if (texture == nullptr) {
-        return;
-    }
-
-    int w = 0;
-    int h = 0;
-    SDL_QueryTexture(texture, nullptr, nullptr, &w, &h);
-    const SDL_Rect dst{x, y, w, h};
-    SDL_RenderCopy(renderer, texture, nullptr, &dst);
-    SDL_DestroyTexture(texture);
+    const SDL_Rect dst{x, y, entry.width, entry.height};
+    SDL_RenderCopy(renderer, entry.texture, nullptr, &dst);
 }
 
 } // namespace d2df::render

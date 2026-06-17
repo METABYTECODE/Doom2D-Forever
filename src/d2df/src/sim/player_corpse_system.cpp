@@ -38,6 +38,47 @@ bool is_below_map(float y, int map_height) {
 void PlayerCorpseSystem::clear() {
     corpses_.clear();
     gibs_.clear();
+    tracked_corpse_index_ = -1;
+    tracked_gib_start_ = -1;
+    tracked_gib_count_ = 0;
+}
+
+const PlayerCorpse* PlayerCorpseSystem::tracked_corpse() const {
+    if (tracked_corpse_index_ < 0 ||
+        tracked_corpse_index_ >= static_cast<int>(corpses_.size())) {
+        return nullptr;
+    }
+    const PlayerCorpse& corpse = corpses_[tracked_corpse_index_];
+    if (!corpse.active) {
+        return nullptr;
+    }
+    return &corpse;
+}
+
+void PlayerCorpseSystem::tracked_gib_centroid(float render_alpha, float& out_x, float& out_y,
+                                              int& out_count) const {
+    out_x = 0.0f;
+    out_y = 0.0f;
+    out_count = 0;
+    if (tracked_gib_start_ < 0 || tracked_gib_count_ <= 0) {
+        return;
+    }
+
+    const int gib_end =
+        std::min(tracked_gib_start_ + tracked_gib_count_, static_cast<int>(gibs_.size()));
+    for (int i = tracked_gib_start_; i < gib_end; ++i) {
+        const PlayerGib& gib = gibs_[i];
+        if (!gib.active) {
+            continue;
+        }
+        out_x += gib.prev_x + (gib.x - gib.prev_x) * render_alpha;
+        out_y += gib.prev_y + (gib.y - gib.prev_y) * render_alpha;
+        ++out_count;
+    }
+    if (out_count > 0) {
+        out_x /= static_cast<float>(out_count);
+        out_y /= static_cast<float>(out_count);
+    }
 }
 
 void PlayerCorpseSystem::spawn_from_death(const PlayerState& player, int map_height) {
@@ -46,6 +87,9 @@ void PlayerCorpseSystem::spawn_from_death(const PlayerState& player, int map_hei
     }
 
     if (player.death_health() < kPlayerDeathGibHealthThreshold) {
+        tracked_corpse_index_ = -1;
+        tracked_gib_start_ = static_cast<int>(gibs_.size());
+        tracked_gib_count_ = kPlayerGibCount;
         const float center_x = player.x + PlayerState::width * 0.5f;
         const float center_y = player.y + PlayerState::height * 0.5f;
         spawn_gibs(center_x, center_y, player.vel_x / 2, player.vel_y / 2);
@@ -56,6 +100,9 @@ void PlayerCorpseSystem::spawn_from_death(const PlayerState& player, int map_hei
         return;
     }
 
+    tracked_corpse_index_ = static_cast<int>(corpses_.size());
+    tracked_gib_start_ = -1;
+    tracked_gib_count_ = 0;
     spawn_corpse(player);
 }
 

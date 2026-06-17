@@ -17,6 +17,7 @@
 #endif
 
 #include <d2df/app/content_paths.hpp>
+#include <d2df/app/main_menu.hpp>
 #include <d2df/app/map_viewer.hpp>
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
@@ -75,6 +76,7 @@ bool GameApp::init_sdl() {
 
 void GameApp::shutdown_sdl() {
     map_viewer_.reset();
+    main_menu_.reset();
 #if D2DF_DEBUG_UI
     if (debug_ui_) {
         debug_ui_->shutdown();
@@ -151,6 +153,20 @@ bool GameApp::resolve_asset_paths() {
     return true;
 }
 
+bool GameApp::start_map(const std::filesystem::path& map_path) {
+    config_.map_path = map_path;
+    if (!init_map_viewer()) {
+        return false;
+    }
+    events_->publish(events::AppStarted{});
+    return true;
+}
+
+void GameApp::show_main_menu() {
+    map_viewer_.reset();
+    main_menu_ = std::make_unique<MainMenu>(renderer_, config_.content_root);
+}
+
 bool GameApp::init_map_viewer() {
     try {
         map_viewer_ = std::make_unique<MapViewer>(renderer_, config_.content_root, config_.map_path,
@@ -187,7 +203,9 @@ void GameApp::process_frame() {
     }
 #endif
 
-    if (map_viewer_) {
+    if (main_menu_) {
+        main_menu_->render(viewport_w, viewport_h);
+    } else if (map_viewer_) {
         map_viewer_->update(dt);
         map_viewer_->render(viewport_w, viewport_h);
     } else {
@@ -211,7 +229,7 @@ void GameApp::process_frame() {
 
 int GameApp::run() {
     init_logging();
-    spdlog::info("Doom2D Forever — Phase 5 (combat MVP)");
+    spdlog::info("Doom2D Forever — single-player");
 
     if (!init_sdl()) {
         return 1;
@@ -227,11 +245,13 @@ int GameApp::run() {
     debug_ui_ = std::make_unique<debug::DebugUi>();
 #endif
 
-    if (!init_map_viewer()) {
-        return 1;
+    if (config_.skip_main_menu) {
+        if (!start_map(config_.map_path)) {
+            return 1;
+        }
+    } else {
+        show_main_menu();
     }
-
-    events_->publish(events::AppStarted{});
 
     running_ = true;
     last_tick_ = std::chrono::steady_clock::now();
@@ -259,16 +279,40 @@ int GameApp::run() {
                     debug_ui_->toggle_menu();
                 } else if (map_viewer_) {
                     map_viewer_->toggle_pause();
+                } else if (main_menu_) {
+                    main_menu_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
+                    if (main_menu_->quit_requested()) {
+                        running_ = false;
+                    }
                 } else {
                     running_ = false;
                 }
 #else
                 if (map_viewer_) {
                     map_viewer_->toggle_pause();
+                } else if (main_menu_) {
+                    main_menu_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
+                    if (main_menu_->quit_requested()) {
+                        running_ = false;
+                    }
                 } else {
                     running_ = false;
                 }
 #endif
+            } else if (main_menu_) {
+                if (event.type == SDL_KEYDOWN) {
+                    main_menu_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
+                    if (main_menu_->quit_requested()) {
+                        running_ = false;
+                    }
+                    std::filesystem::path selected_map;
+                    if (main_menu_->consume_map_selection(selected_map)) {
+                        main_menu_.reset();
+                        if (!start_map(selected_map)) {
+                            show_main_menu();
+                        }
+                    }
+                }
             } else if (map_viewer_) {
 #if D2DF_DEBUG_UI
                 const bool block_input =
@@ -282,6 +326,9 @@ int GameApp::run() {
                     map_viewer_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
                     if (map_viewer_->consume_quit_request()) {
                         running_ = false;
+                    }
+                    if (map_viewer_->consume_return_to_main_menu_request()) {
+                        show_main_menu();
                     }
                 } else if (event.type == SDL_KEYUP) {
                     map_viewer_->handle_key_up(event.key.keysym.sym);

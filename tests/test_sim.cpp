@@ -2864,6 +2864,32 @@ TEST_CASE("player death corpse and gib spawning", "[sim][player]") {
     CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 99, 0) == sim::kPlayerDie1Frames - 1);
 }
 
+TEST_CASE("tracked corpse follows latest player death", "[sim][player]") {
+    sim::PlayerCorpseSystem corpses;
+
+    sim::PlayerState first_death;
+    first_death.snap_to(50.0f, 100.0f);
+    CHECK(first_death.apply_damage(120));
+    for (int i = 0; i < sim::kPlayerDie1Ticks; ++i) {
+        first_death.tick_corpse();
+    }
+    corpses.spawn_from_death(first_death, 1000);
+    CHECK(corpses.corpses().size() == 1);
+    CHECK(corpses.tracked_corpse() == &corpses.corpses().front());
+    CHECK(corpses.tracked_corpse()->x == 50.0f);
+
+    sim::PlayerState second_death;
+    second_death.snap_to(300.0f, 400.0f);
+    CHECK(second_death.apply_damage(120));
+    for (int i = 0; i < sim::kPlayerDie1Ticks; ++i) {
+        second_death.tick_corpse();
+    }
+    corpses.spawn_from_death(second_death, 1000);
+    CHECK(corpses.corpses().size() == 2);
+    CHECK(corpses.tracked_corpse() == &corpses.corpses().back());
+    CHECK(corpses.tracked_corpse()->x == 300.0f);
+}
+
 TEST_CASE("game save json roundtrip preserves player combat", "[sim][save]") {
     sim::PlayerState player;
     player.snap_to(128.0f, 256.0f);

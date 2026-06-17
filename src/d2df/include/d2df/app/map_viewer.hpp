@@ -12,6 +12,7 @@
 #include <d2df/map/map_document.hpp>
 #include <d2df/render/camera2d.hpp>
 #include <d2df/render/map_renderer.hpp>
+#include <d2df/render/map_render_index.hpp>
 #include <d2df/render/text_renderer.hpp>
 #include <d2df/render/texture_cache.hpp>
 #include <d2df/resources/asset_database.hpp>
@@ -63,6 +64,7 @@ public:
     void toggle_pause();
     [[nodiscard]] bool is_paused() const { return paused_; }
     [[nodiscard]] bool consume_quit_request();
+    [[nodiscard]] bool consume_return_to_main_menu_request();
 
 #if D2DF_DEBUG_UI
     void set_debug_ui(debug::DebugUi* debug_ui) { debug_ui_ = debug_ui; }
@@ -106,6 +108,7 @@ private:
     std::filesystem::path current_map_path_;
     d2df::resources::AssetDatabase assets_;
     map::MapDocument map_;
+    render::MapRenderIndex map_render_index_;
     render::Camera2D camera_;
     render::MapRenderer map_renderer_;
     render::TextRenderer text_;
@@ -130,6 +133,7 @@ private:
     bool paused_ = false;
     int pause_selection_ = 0;
     bool quit_requested_ = false;
+    bool return_to_main_menu_requested_ = false;
     std::string save_status_message_;
     int save_status_ticks_ = 0;
     float camera_move_speed_ = 480.0f;

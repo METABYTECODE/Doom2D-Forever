@@ -17,6 +17,11 @@ struct Camera2D {
 
     void world_rect_to_screen(float world_x, float world_y, float world_w, float world_h, int viewport_w,
                               int viewport_h, int& out_x, int& out_y, int& out_w, int& out_h) const;
+
+    /// World-space AABB test against the visible camera region (with optional margin in world units).
+    [[nodiscard]] bool world_rect_in_view(float world_x, float world_y, float world_w, float world_h,
+                                          int viewport_w, int viewport_h,
+                                          float margin_world = 64.0f) const;
 };
 
 } // namespace d2df::render
