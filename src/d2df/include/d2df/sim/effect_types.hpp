@@ -18,6 +18,7 @@ struct ExplosionSprite {
 };
 
 [[nodiscard]] ExplosionSprite explosion_sprite(events::ExplosionKind kind);
+[[nodiscard]] ExplosionSprite rocket_smoke_sprite();
 [[nodiscard]] std::optional<events::ExplosionKind> explosion_kind_for_projectile(ProjectileKind kind);
 [[nodiscard]] const char* explosion_sfx(events::ExplosionKind kind);
 

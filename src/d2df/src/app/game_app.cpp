@@ -27,6 +27,10 @@
 #include <d2df/net/null_network_transport.hpp>
 #include <d2df/net/simulation_authority.hpp>
 
+#if D2DF_DEBUG_UI
+#include <d2df/debug/debug_ui.hpp>
+#endif
+
 namespace d2df {
 
 GameApp::GameApp(GameAppConfig config)
@@ -69,6 +73,12 @@ bool GameApp::init_sdl() {
 
 void GameApp::shutdown_sdl() {
     map_viewer_.reset();
+#if D2DF_DEBUG_UI
+    if (debug_ui_) {
+        debug_ui_->shutdown();
+        debug_ui_.reset();
+    }
+#endif
     if (renderer_) {
         SDL_DestroyRenderer(renderer_);
         renderer_ = nullptr;
@@ -143,6 +153,11 @@ bool GameApp::init_map_viewer() {
     try {
         map_viewer_ = std::make_unique<MapViewer>(renderer_, config_.content_root, config_.map_path,
                                                   events_.get());
+#if D2DF_DEBUG_UI
+        if (debug_ui_ && debug_ui_->init(window_, renderer_)) {
+            map_viewer_->set_debug_ui(debug_ui_.get());
+        }
+#endif
         return true;
     } catch (const std::exception& ex) {
         show_fatal_error(ex.what());
@@ -162,6 +177,12 @@ void GameApp::process_frame() {
     int viewport_h = config_.window_height;
     SDL_GetRendererOutputSize(renderer_, &viewport_w, &viewport_h);
 
+#if D2DF_DEBUG_UI
+    if (debug_ui_) {
+        debug_ui_->begin_frame();
+    }
+#endif
+
     if (map_viewer_) {
         map_viewer_->update(dt);
         map_viewer_->render(viewport_w, viewport_h);
@@ -169,6 +190,12 @@ void GameApp::process_frame() {
         SDL_SetRenderDrawColor(renderer_, 20, 15, 26, 255);
         SDL_RenderClear(renderer_);
     }
+
+#if D2DF_DEBUG_UI
+    if (debug_ui_) {
+        debug_ui_->render();
+    }
+#endif
 
     SDL_RenderPresent(renderer_);
 }
@@ -187,6 +214,10 @@ int GameApp::run() {
 
     register_core_services();
 
+#if D2DF_DEBUG_UI
+    debug_ui_ = std::make_unique<debug::DebugUi>();
+#endif
+
     if (!init_map_viewer()) {
         return 1;
     }
@@ -199,16 +230,50 @@ int GameApp::run() {
     while (running_) {
         SDL_Event event{};
         while (SDL_PollEvent(&event)) {
+#if D2DF_DEBUG_UI
+            if (debug_ui_) {
+                debug_ui_->process_event(event);
+            }
+#endif
             if (event.type == SDL_QUIT) {
                 running_ = false;
+            } else if (event.type == SDL_KEYDOWN &&
+                       event.key.keysym.scancode == SDL_SCANCODE_INSERT) {
+#if D2DF_DEBUG_UI
+                if (debug_ui_) {
+                    debug_ui_->toggle_menu();
+                }
+#endif
             } else if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+#if D2DF_DEBUG_UI
+                if (debug_ui_ && debug_ui_->menu_visible()) {
+                    debug_ui_->toggle_menu();
+                } else {
+                    running_ = false;
+                }
+#else
                 running_ = false;
-            } else if (event.type == SDL_KEYDOWN && map_viewer_) {
-                map_viewer_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
-            } else if (event.type == SDL_KEYUP && map_viewer_) {
-                map_viewer_->handle_key_up(event.key.keysym.sym);
-            } else if (event.type == SDL_MOUSEWHEEL && map_viewer_) {
-                map_viewer_->handle_mouse_wheel(event.wheel.y);
+#endif
+            } else if (map_viewer_) {
+#if D2DF_DEBUG_UI
+                const bool block_input =
+                    debug_ui_ &&
+                    (debug_ui_->wants_capture_keyboard() || debug_ui_->wants_capture_mouse());
+                if (block_input) {
+                    continue;
+                }
+#endif
+                if (event.type == SDL_KEYDOWN) {
+                    map_viewer_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
+                } else if (event.type == SDL_KEYUP) {
+                    map_viewer_->handle_key_up(event.key.keysym.sym);
+                } else if (event.type == SDL_MOUSEWHEEL) {
+                    map_viewer_->handle_mouse_wheel(event.wheel.y);
+                }
+            }
+
+            if (!running_) {
+                break;
             }
         }
 

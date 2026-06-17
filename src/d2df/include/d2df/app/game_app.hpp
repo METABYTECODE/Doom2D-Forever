@@ -5,6 +5,12 @@
 #include <memory>
 #include <string>
 
+#if D2DF_DEBUG_UI
+namespace d2df::debug {
+class DebugUi;
+} // namespace d2df::debug
+#endif
+
 struct SDL_Window;
 struct SDL_Renderer;
 
@@ -51,6 +57,10 @@ private:
     std::unique_ptr<ServiceRegistry> services_;
     std::unique_ptr<EventBus> events_;
     std::unique_ptr<MapViewer> map_viewer_;
+
+#if D2DF_DEBUG_UI
+    std::unique_ptr<debug::DebugUi> debug_ui_;
+#endif
 
     bool running_ = false;
     std::chrono::steady_clock::time_point last_tick_;

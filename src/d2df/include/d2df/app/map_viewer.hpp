@@ -19,9 +19,16 @@
 #include <d2df/sim/weapon_types.hpp>
 
 #include <filesystem>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+#if D2DF_DEBUG_UI
+namespace d2df::debug {
+class DebugUi;
+} // namespace d2df::debug
+#endif
 
 struct SDL_Renderer;
 
@@ -35,6 +42,7 @@ struct WorldEffect {
     float y = 0.0f;
     int anim_tick = 0;
     int duration_ticks = 0;
+    std::uint8_t alpha = 255;
 };
 
 class MapViewer {
@@ -48,7 +56,13 @@ public:
     void update(float frame_dt);
     void render(int viewport_w, int viewport_h);
 
+#if D2DF_DEBUG_UI
+    void set_debug_ui(debug::DebugUi* debug_ui) { debug_ui_ = debug_ui; }
+    void draw_debug_overlays(int viewport_w, int viewport_h);
+#endif
+
     [[nodiscard]] const map::MapDocument& map() const { return map_; }
+    [[nodiscard]] const render::Camera2D& camera() const { return camera_; }
 
 private:
     void load_map(const std::filesystem::path& map_path);
@@ -62,6 +76,7 @@ private:
     void draw_effects(int viewport_w, int viewport_h);
     void tick_effects();
     void spawn_explosion_effect(const events::WorldExplosion& event);
+    void spawn_smoke_effect(const events::WorldSmokePuff& event);
     void draw_hud(int viewport_w, int viewport_h);
     void update_camera_follow(float render_alpha = 1.0f);
 
@@ -94,6 +109,9 @@ private:
     EventBus* events_ = nullptr;
     audio::SoundSystem sound_;
     std::vector<WorldEffect> effects_;
+#if D2DF_DEBUG_UI
+    debug::DebugUi* debug_ui_ = nullptr;
+#endif
 };
 
 } // namespace d2df

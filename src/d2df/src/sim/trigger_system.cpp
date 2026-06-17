@@ -669,7 +669,7 @@ void TriggerSystem::activate_trigger(std::size_t trigger_index, PlayerState& pla
     case map::TriggerType::On:
     case map::TriggerType::Off:
     case map::TriggerType::OnOff:
-        publish_switch_sound(events, trigger_sound_x(trigger), trigger_sound_y(trigger));
+        // Legacy Press/On/Off/OnOff only queue expander state; switch SFX plays for lifts/doors.
         queue_expander(trigger_index);
         mark_trigger_used(trigger_index);
         return;

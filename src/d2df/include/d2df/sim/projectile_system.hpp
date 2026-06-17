@@ -97,7 +97,8 @@ private:
                          EventBus* events, int map_width, int map_height);
     bool tick_ballistic(std::size_t index, const MapCollision& collision, TriggerSystem* triggers,
                         PlayerState& player, std::vector<ShootableTarget>& targets,
-                        EventBus* events, std::uint16_t move_state, bool can_collide);
+                        EventBus* events, std::uint16_t move_state, bool can_hit_world,
+                        bool hit_target, std::size_t hit_target_index);
 
     std::vector<Projectile> projectiles_;
 };

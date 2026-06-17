@@ -13,6 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(D2DF_BUILD_TESTS "Build unit tests" ON)
 option(D2DF_BUILD_TOOLS "Build asset/import tools" ON)
+option(D2DF_DEBUG_UI "Build ImGui debug overlay in the client" ON)
 option(D2DF_HEADLESS_SERVER "Build server without SDL window" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

@@ -886,6 +886,50 @@ TEST_CASE("pistol projectile damages shootable target", "[sim][combat]") {
     CHECK(player.combat().ammo_for_current_weapon() == 49);
 }
 
+TEST_CASE("pistol projectile damages target at point blank range", "[sim][combat]") {
+    map::MapDocument doc;
+    doc.size = {512, 512};
+
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    player.combat().facing_left = false;
+    player.combat().select_weapon(sim::WeaponId::Pistol);
+    give_ammo(player.combat(), sim::AmmoType::Bullets, 50);
+
+    std::vector<sim::ShootableTarget> targets;
+    sim::ShootableTarget target;
+    target.id = 100;
+    target.x = 138.0f;
+    target.y = 100.0f;
+    target.width = 34.0f;
+    target.height = 52.0f;
+    target.health = 100;
+    targets.push_back(target);
+
+    sim::WeaponSystem weapons;
+    sim::ProjectileSystem projectiles;
+    sim::PlayerInput fire_input{};
+    fire_input.fire = true;
+
+    weapons.tick(player, collision, fire_input, targets, nullptr, &projectiles, 1, nullptr,
+                 doc.size.width);
+
+    bool damaged = false;
+    for (int i = 0; i < 8; ++i) {
+        projectiles.tick(collision, nullptr, player, targets, nullptr, doc.size.width,
+                         doc.size.height);
+        if (targets[0].health < 100) {
+            damaged = true;
+            break;
+        }
+    }
+
+    CHECK(damaged);
+}
+
 TEST_CASE("PlayerFired and EntityDamaged events on pistol fire", "[sim][combat]") {
     map::MapDocument doc;
     doc.size = {512, 512};
@@ -2029,6 +2073,15 @@ TEST_CASE("explosion kind mapping matches projectile types", "[sim][combat]") {
           "sfx.world.explodeball");
 }
 
+TEST_CASE("rocket smoke sprite matches legacy FRAMES_SMOKE", "[sim][combat]") {
+    const auto sprite = sim::rocket_smoke_sprite();
+    CHECK(std::string_view(sprite.texture_id) == "tex.ui.smoke");
+    CHECK(sprite.frame_width == 32);
+    CHECK(sprite.frame_height == 32);
+    CHECK(sprite.frame_count == 10);
+    CHECK(sprite.anim_period == 3);
+}
+
 TEST_CASE("rocket explosion splash damages nearby player", "[sim][combat]") {
     map::MapDocument doc;
     doc.panels.push_back(map::MapPanel{});
@@ -2509,4 +2562,49 @@ TEST_CASE("player anim resolves stand walk aim and fire states", "[sim][player]"
     CHECK(placement.x == 85.0f);
     CHECK(placement.y == 188.0f);
     CHECK_FALSE(placement.flip_horizontal);
+}
+
+TEST_CASE("moonwalk keeps run direction while flipping facing", "[sim][player]") {
+    map::MapDocument doc;
+    sim::MapCollision collision;
+    collision.build_from_map(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+
+    sim::PlayerInput right{};
+    right.right = true;
+    for (int i = 0; i < 24; ++i) {
+        player.fixed_update(collision, right);
+    }
+
+    CHECK_FALSE(player.combat().facing_left);
+    CHECK(player.vel_x > 0);
+
+    sim::PlayerInput both{};
+    both.left = true;
+    both.right = true;
+    for (int i = 0; i < 4; ++i) {
+        player.fixed_update(collision, both);
+    }
+
+    CHECK(player.combat().facing_left);
+    CHECK(player.vel_x > 0);
+
+    sim::PlayerInput left{};
+    left.left = true;
+    for (int i = 0; i < 24; ++i) {
+        player.fixed_update(collision, left);
+    }
+
+    CHECK(player.combat().facing_left);
+    CHECK(player.vel_x < 0);
+
+    sim::PlayerInput both_left{};
+    both_left.left = true;
+    both_left.right = true;
+    player.fixed_update(collision, both_left);
+
+    CHECK_FALSE(player.combat().facing_left);
+    CHECK(player.vel_x < 0);
 }

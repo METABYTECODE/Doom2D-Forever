@@ -1,5 +1,12 @@
 #include <d2df/app/map_viewer.hpp>
 
+#if D2DF_DEBUG_UI
+#include <d2df/debug/debug_ui.hpp>
+#include <d2df/debug/debug_world_view.hpp>
+#endif
+
+#include <algorithm>
+
 #include <SDL.h>
 #include <spdlog/spdlog.h>
 
@@ -160,6 +167,8 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                 }
                 spawn_explosion_effect(event);
             });
+            events_->subscribe<events::WorldSmokePuff>(
+                [this](const events::WorldSmokePuff& event) { spawn_smoke_effect(event); });
             events_->subscribe<events::PlayerDamaged>([this](const events::PlayerDamaged& event) {
                 if (event.amount <= 0) {
                     return;
@@ -924,6 +933,21 @@ void MapViewer::spawn_explosion_effect(const events::WorldExplosion& event) {
     effects_.push_back(effect);
 }
 
+void MapViewer::spawn_smoke_effect(const events::WorldSmokePuff& event) {
+    const auto sprite = sim::rocket_smoke_sprite();
+    if (sprite.texture_id == nullptr || sprite.frame_count <= 0 || sprite.anim_period <= 0) {
+        return;
+    }
+
+    WorldEffect effect;
+    effect.sprite = sprite;
+    effect.x = event.x + sprite.draw_offset_x;
+    effect.y = event.y + sprite.draw_offset_y;
+    effect.duration_ticks = sprite.frame_count * sprite.anim_period;
+    effect.alpha = 150;
+    effects_.push_back(effect);
+}
+
 void MapViewer::tick_effects() {
     for (auto& effect : effects_) {
         ++effect.anim_tick;
@@ -978,7 +1002,7 @@ void MapViewer::draw_effects(int viewport_w, int viewport_h) {
             continue;
         }
 
-        SDL_SetTextureAlphaMod(texture, 255);
+        SDL_SetTextureAlphaMod(texture, effect.alpha);
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
         const SDL_Rect src{frame_index * frame_w, 0, frame_w, frame_h};
         const SDL_Rect dst{dst_x, dst_y, dst_w, dst_h};
@@ -1052,7 +1076,29 @@ void MapViewer::render(int viewport_w, int viewport_h) {
     draw_items(viewport_w, viewport_h, true);
     draw_projectiles(viewport_w, viewport_h);
     draw_effects(viewport_w, viewport_h);
+#if D2DF_DEBUG_UI
+    draw_debug_overlays(viewport_w, viewport_h);
+#endif
     draw_hud(viewport_w, viewport_h);
 }
+
+#if D2DF_DEBUG_UI
+void MapViewer::draw_debug_overlays(int viewport_w, int viewport_h) {
+    if (debug_ui_ == nullptr) {
+        return;
+    }
+
+    const debug::DebugWorldView world{
+        world_.player(),
+        world_.targets(),
+        world_.projectiles(),
+        collision_,
+        triggers_.map_view(map_),
+        triggers_,
+        fixed_timestep_.render_alpha(),
+    };
+    debug_ui_->draw_world(renderer_, camera_, viewport_w, viewport_h, world);
+}
+#endif
 
 } // namespace d2df

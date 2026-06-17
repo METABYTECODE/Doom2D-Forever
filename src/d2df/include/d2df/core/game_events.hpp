@@ -90,6 +90,11 @@ struct WorldExplosion {
     float y = 0.f;
 };
 
+struct WorldSmokePuff {
+    float x = 0.f;
+    float y = 0.f;
+};
+
 struct ItemPickedUp {
     std::uint8_t item_type = 0;
 };

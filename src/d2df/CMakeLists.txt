@@ -155,6 +155,61 @@ target_link_libraries(d2df_render
 
 d2df_set_warnings(d2df_render)
 
+if(D2DF_DEBUG_UI)
+    include(FetchContent)
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.91.9
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(imgui)
+
+    add_library(imgui_sdl2 STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer2.cpp
+    )
+
+    target_include_directories(imgui_sdl2
+        PUBLIC
+            ${imgui_SOURCE_DIR}
+            ${imgui_SOURCE_DIR}/backends
+    )
+
+    target_link_libraries(imgui_sdl2 PUBLIC SDL2::SDL2)
+
+    add_library(d2df_debug STATIC
+        src/debug/debug_draw.cpp
+        src/debug/debug_ui.cpp
+        src/debug/panels/collision_debug_panel.cpp
+        src/debug/panels/tiles_debug_panel.cpp
+    )
+
+    add_library(d2df::debug ALIAS d2df_debug)
+
+    target_include_directories(d2df_debug
+        PUBLIC
+            "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    )
+
+    target_link_libraries(d2df_debug
+        PUBLIC
+            d2df::core
+            d2df::map
+            d2df::sim
+            d2df::render
+            SDL2::SDL2
+            imgui_sdl2
+    )
+
+    d2df_set_warnings(d2df_debug)
+    d2df_set_warnings(imgui_sdl2)
+endif()
+
 add_library(d2df_app STATIC
     src/app/content_paths.cpp
     src/app/game_app.cpp
@@ -174,6 +229,13 @@ target_link_libraries(d2df_app
         d2df::resources
         SDL2::SDL2
 )
+
+if(D2DF_DEBUG_UI)
+    target_compile_definitions(d2df_app PUBLIC D2DF_DEBUG_UI=1)
+    target_link_libraries(d2df_app PUBLIC d2df::debug)
+else()
+    target_compile_definitions(d2df_app PUBLIC D2DF_DEBUG_UI=0)
+endif()
 
 if(WIN32)
     target_compile_definitions(d2df_app PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)

@@ -10,6 +10,11 @@ ExplosionSprite make_sprite(const char* texture_id, int frame_w, int frame_h, in
 
 } // namespace
 
+ExplosionSprite rocket_smoke_sprite() {
+    // Legacy FRAMES_SMOKE: 32x32, 10 frames, 3 ticks per frame, alpha 150.
+    return make_sprite("tex.ui.smoke", 32, 32, 10, 3, -14.0f, -20.0f);
+}
+
 ExplosionSprite explosion_sprite(events::ExplosionKind kind) {
     switch (kind) {
     case events::ExplosionKind::Rocket:

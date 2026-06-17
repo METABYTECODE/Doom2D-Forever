@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/core/types.hpp>
 #include <d2df/sim/combat_common.hpp>
 #include <d2df/sim/effect_types.hpp>
+#include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/trigger_system.hpp>
 
 namespace d2df::sim {
@@ -49,7 +51,7 @@ constexpr int kBfgLifetime = 700;
 constexpr int kBfgExplosionRadius = 128;
 constexpr int kBfgSplashDamage = 50;
 constexpr int kBfgDirectDamage = 100;
-constexpr int kSpawnGraceTicks = 4;
+constexpr int kSpawnGraceTicks = 2;
 constexpr float kSpawnNudge = 8.0f;
 
 constexpr int kShotgunSpread[][2] = {
@@ -95,6 +97,15 @@ void compute_spawn_pose(float muzzle_x, float muzzle_y, float aim_x, float aim_y
 
 bool overlaps_any_target(const Projectile& projectile, const std::vector<ShootableTarget>& targets,
                          std::size_t& target_index) {
+    const float start_cx = projectile.prev_x + projectile.width * 0.5f;
+    const float start_cy = projectile.prev_y + projectile.height * 0.5f;
+    const float end_cx = projectile.x + projectile.width * 0.5f;
+    const float end_cy = projectile.y + projectile.height * 0.5f;
+    const bool use_swept = start_cx != end_cx || start_cy != end_cy;
+
+    float best_distance_sq = std::numeric_limits<float>::max();
+    bool found = false;
+
     for (std::size_t i = 0; i < targets.size(); ++i) {
         if (!targets[i].alive()) {
             continue;
@@ -102,13 +113,29 @@ bool overlaps_any_target(const Projectile& projectile, const std::vector<Shootab
         if (targets[i].id == projectile.shooter_id) {
             continue;
         }
-        if (rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height,
-                          targets[i].x, targets[i].y, targets[i].width, targets[i].height)) {
+
+        float hit_distance_sq = 0.0f;
+        bool hit = rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height,
+                                 targets[i].x, targets[i].y, targets[i].width,
+                                 targets[i].height);
+
+        if (!hit && use_swept) {
+            float hit_x = 0.0f;
+            float hit_y = 0.0f;
+            hit = segment_intersects_aabb(start_cx, start_cy, end_cx, end_cy, targets[i].x,
+                                          targets[i].y, targets[i].width + projectile.width,
+                                          targets[i].height + projectile.height, hit_x, hit_y,
+                                          hit_distance_sq);
+        }
+
+        if (hit && hit_distance_sq < best_distance_sq) {
+            best_distance_sq = hit_distance_sq;
             target_index = i;
-            return true;
+            found = true;
         }
     }
-    return false;
+
+    return found;
 }
 
 void publish_player_projectile_damage(EventBus* events, int amount, int health_remaining) {
@@ -151,6 +178,25 @@ void publish_projectile_explosion(EventBus* events, ProjectileKind kind, float c
         return;
     }
     events->publish(events::WorldExplosion{*explosion_kind, cx, cy});
+}
+
+void publish_rocket_smoke(EventBus* events, const Projectile& projectile, int move_state) {
+    if (events == nullptr) {
+        return;
+    }
+    if (projectile.kind != ProjectileKind::Rocket && projectile.kind != ProjectileKind::SkelFire) {
+        return;
+    }
+    if ((move_state & MOVE_INWATER) != 0) {
+        return;
+    }
+
+    const float cx = projectile.x + projectile.width * 0.5f;
+    const float cy = projectile.y + projectile.height * 0.5f;
+    const int jitter_x = projectile.anim_tick % 9;
+    const int jitter_y = (projectile.anim_tick * 3) % 9;
+    events->publish(events::WorldSmokePuff{cx + static_cast<float>(jitter_x),
+                                           cy + static_cast<float>(jitter_y)});
 }
 
 bool resolve_homing_aim(EntityId target_id, const PlayerState& player,
@@ -470,13 +516,14 @@ void ProjectileSystem::explode_bfg(std::size_t index, TriggerSystem* triggers, P
 bool ProjectileSystem::tick_ballistic(std::size_t index, const MapCollision& /*collision*/,
                                       TriggerSystem* /*triggers*/, PlayerState& player,
                                       std::vector<ShootableTarget>& targets, EventBus* events,
-                                      std::uint16_t move_state, bool can_collide) {
+                                      std::uint16_t move_state, bool can_hit_world,
+                                      bool hit_target, std::size_t hit_target_index) {
     auto& projectile = projectiles_[index];
     const bool from_player = projectile.shooter_id == kPlayerEntityId;
     const float cx = projectile.x + projectile.width * 0.5f;
     const float cy = projectile.y + projectile.height * 0.5f;
 
-    if (can_collide && !from_player && player.alive() &&
+    if (can_hit_world && !from_player && player.alive() &&
         rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height, player.x,
                       player.y, player.width, player.height)) {
         const int health_before = player.health();
@@ -487,9 +534,7 @@ bool ProjectileSystem::tick_ballistic(std::size_t index, const MapCollision& /*c
         return true;
     }
 
-    std::size_t hit_target_index = 0;
-    if (can_collide && from_player &&
-        overlaps_any_target(projectile, targets, hit_target_index)) {
+    if (hit_target && from_player) {
         auto& target = targets[hit_target_index];
         const int health_before = target.health;
         target.apply_damage(projectile.damage, projectile.shooter_id);
@@ -501,7 +546,7 @@ bool ProjectileSystem::tick_ballistic(std::size_t index, const MapCollision& /*c
         return true;
     }
 
-    if (can_collide && (move_state & (MOVE_HITWALL | MOVE_HITCEIL | MOVE_HITLAND)) != 0) {
+    if (can_hit_world && (move_state & (MOVE_HITWALL | MOVE_HITCEIL | MOVE_HITLAND)) != 0) {
         publish_projectile_explosion(events, projectile.kind, cx, cy);
         destroy_projectile(index);
         return true;
@@ -531,15 +576,24 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
     projectile.x = next_x;
     projectile.y = next_y;
 
+    if (projectile.kind == ProjectileKind::Rocket || projectile.kind == ProjectileKind::SkelFire) {
+        publish_rocket_smoke(events, projectile, move_state);
+    }
+
     --projectile.timeout;
     if (projectile.spawn_grace_ticks > 0) {
         --projectile.spawn_grace_ticks;
     }
-    const bool can_collide = projectile.spawn_grace_ticks <= 0;
+    // Grace only suppresses world/player collisions so muzzle-inside-body shots do not self-hit.
+    // Targets are always checked so point-blank shots cannot tunnel through during grace.
+    const bool can_hit_world = projectile.spawn_grace_ticks <= 0;
 
-    if (triggers != nullptr && can_collide) {
-        triggers->press_shot_rect(projectile.x, projectile.y, projectile.width, projectile.height,
-                                  player, events);
+    if (triggers != nullptr && can_hit_world) {
+        const float cx0 = projectile.prev_x + projectile.width * 0.5f;
+        const float cy0 = projectile.prev_y + projectile.height * 0.5f;
+        const float cx1 = projectile.x + projectile.width * 0.5f;
+        const float cy1 = projectile.y + projectile.height * 0.5f;
+        triggers->press_shot_line(cx0, cy0, cx1, cy1, player, events);
     }
 
     const bool out_of_bounds =
@@ -572,15 +626,14 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
     }
 
     const bool hit_solid =
-        can_collide && (move_state & (MOVE_HITWALL | MOVE_HITCEIL | MOVE_HITLAND)) != 0;
+        can_hit_world && (move_state & (MOVE_HITWALL | MOVE_HITCEIL | MOVE_HITLAND)) != 0;
 
     std::size_t hit_target_index = 0;
-    const bool hit_target =
-        can_collide && overlaps_any_target(projectile, targets, hit_target_index);
+    const bool hit_target = overlaps_any_target(projectile, targets, hit_target_index);
 
     if (is_ballistic_kind(projectile.kind)) {
         if (tick_ballistic(index, collision, triggers, player, targets, events, move_state,
-                           can_collide)) {
+                           can_hit_world, hit_target, hit_target_index)) {
             return;
         }
     }
@@ -588,7 +641,7 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
     if (projectile.kind == ProjectileKind::Rocket || projectile.kind == ProjectileKind::SkelFire) {
         const bool from_player = projectile.shooter_id == kPlayerEntityId;
         const bool hit_player =
-            can_collide && !from_player && player.alive() &&
+            can_hit_world && !from_player && player.alive() &&
             rects_overlap(projectile.x, projectile.y, projectile.width, projectile.height, player.x,
                           player.y, player.width, player.height);
 
@@ -611,7 +664,7 @@ void ProjectileSystem::tick_projectile(std::size_t index, const MapCollision& co
             return;
         }
 
-        if (projectile.kind == ProjectileKind::SkelFire && can_collide &&
+        if (projectile.kind == ProjectileKind::SkelFire && can_hit_world &&
             projectile.homing_target_id != 0) {
             retarget_homing_projectile(projectile, player, targets, kSkelFireSpeed);
         }

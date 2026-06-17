@@ -113,8 +113,8 @@ struct PlayerState {
     [[nodiscard]] const PlayerCombat& combat() const { return combat_; }
 
 private:
-    void update_facing(bool left, bool right);
-    void apply_run(bool left, bool right);
+    void update_movement_inputs(bool left, bool right);
+    void apply_run();
     void try_jump(const MapCollision& collision);
     static int z_dec(int value, int amount);
 
@@ -136,6 +136,8 @@ private:
     bool in_water_ = false;
     bool in_acid_ = false;
     bool on_lift_ = false;
+    /// Legacy MoveButton: -1 = left, 0 = none, 1 = right. Unchanged while both keys held.
+    int run_direction_ = 0;
     PlayerCombat combat_;
 };
 

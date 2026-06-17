@@ -33,6 +33,7 @@ void PlayerState::snap_to(float pos_x, float pos_y) {
     in_water_ = false;
     in_acid_ = false;
     on_lift_ = false;
+    run_direction_ = 0;
 }
 
 void PlayerState::reset_to_spawn(float spawn_x, float spawn_y) {
@@ -186,10 +187,22 @@ void PlayerState::set_health(int value) {
     health_ = std::max(0, value);
 }
 
-void PlayerState::update_facing(bool left, bool right) {
+void PlayerState::update_movement_inputs(bool left, bool right) {
     if (left && !right) {
-        combat_.facing_left = true;
+        run_direction_ = -1;
     } else if (right && !left) {
+        run_direction_ = 1;
+    } else if (!left && !right) {
+        run_direction_ = 0;
+    }
+
+    if (run_direction_ == 1 && left) {
+        combat_.facing_left = true;
+    } else if (run_direction_ == -1 && right) {
+        combat_.facing_left = false;
+    } else if (run_direction_ == -1) {
+        combat_.facing_left = true;
+    } else if (run_direction_ == 1) {
         combat_.facing_left = false;
     }
 }
@@ -209,11 +222,10 @@ int PlayerState::z_dec(int value, int amount) {
     return 0;
 }
 
-void PlayerState::apply_run(bool left, bool right) {
-    if (left && vel_x > -kMaxRunVel) {
+void PlayerState::apply_run() {
+    if (run_direction_ == -1 && vel_x > -kMaxRunVel) {
         vel_x -= (kMaxRunVel >> 3);
-    }
-    if (right && vel_x < kMaxRunVel) {
+    } else if (run_direction_ == 1 && vel_x < kMaxRunVel) {
         vel_x += (kMaxRunVel >> 3);
     }
 }
@@ -267,7 +279,8 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
     on_lift_ = false;
 
     if (physics_tick) {
-        apply_run(input.left, input.right);
+        update_movement_inputs(input.left, input.right);
+        apply_run();
 
         switch (collision.vertical_lift_at(x, y, width, height)) {
         case -1:
@@ -329,7 +342,8 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
             try_jump(collision);
         }
     } else if (vel_x == 0) {
-        apply_run(input.left, input.right);
+        update_movement_inputs(input.left, input.right);
+        apply_run();
     }
 
     const int dx = vel_x + accel_x;
@@ -361,7 +375,9 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
         vel_x = z_dec(vel_x, 1);
     }
 
-    update_facing(input.left, input.right);
+    if (!physics_tick) {
+        update_movement_inputs(input.left, input.right);
+    }
 
     if (!input.jump) {
         if (jetpack_active_) {

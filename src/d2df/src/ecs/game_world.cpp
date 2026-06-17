@@ -48,9 +48,6 @@ void GameWorld::reset_player(const map::MapDocument& map) {
     projectiles_.clear();
     items_.reset(map);
     spawn_map_monsters(map);
-    if (targets_.empty()) {
-        spawn_debug_target(map);
-    }
 
     sync_to_ecs();
 }
@@ -76,22 +73,6 @@ void GameWorld::spawn_map_monsters(const map::MapDocument& map) {
         target.health = stats.health;
         targets_.push_back(target);
     }
-}
-
-void GameWorld::spawn_debug_target(const map::MapDocument& map) {
-    sim::ShootableTarget target;
-    target.id = kDebugTargetBaseId;
-    target.width = sim::PlayerState::width;
-    target.height = sim::PlayerState::height;
-    target.max_health = 100;
-    target.health = target.max_health;
-
-    const float base_x = spawn_point_ ? static_cast<float>(spawn_point_->x) : map.size.width * 0.5f;
-    const float base_y = spawn_point_ ? static_cast<float>(spawn_point_->y) : map.size.height * 0.5f;
-    target.x = base_x + 120.0f;
-    target.y = base_y;
-
-    targets_.push_back(target);
 }
 
 void GameWorld::respawn_player() {
