@@ -28,6 +28,7 @@
 #include <d2df/sim/player_corpse_system.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/effect_types.hpp>
+#include <d2df/sim/game_save.hpp>
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/shootable_target.hpp>
 #include <d2df/sim/trigger_system.hpp>
@@ -2861,4 +2862,42 @@ TEST_CASE("player death corpse and gib spawning", "[sim][player]") {
     CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 0, 0) == 0);
     CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 15, 0) == 5);
     CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 99, 0) == sim::kPlayerDie1Frames - 1);
+}
+
+TEST_CASE("game save json roundtrip preserves player combat", "[sim][save]") {
+    sim::PlayerState player;
+    player.snap_to(128.0f, 256.0f);
+    player.set_health(42);
+    player.set_armor(15);
+    player.give_key_red();
+    own_weapon(player.combat(), sim::WeaponId::Chaingun);
+    give_ammo(player.combat(), sim::AmmoType::Bullets, 120);
+
+    sim::GameSaveDocument doc;
+    sim::capture_player_state(player, doc.player);
+    doc.version = sim::kGameSaveVersion;
+    doc.map_path = "maps/doom2d/map01.json";
+    doc.map_id = "map01";
+
+    const auto temp =
+        std::filesystem::temp_directory_path() / "d2df_test_quicksave.json";
+    std::string error;
+    REQUIRE(sim::write_game_save(temp, doc, error));
+
+    sim::GameSaveDocument loaded;
+    REQUIRE(sim::read_game_save(temp, loaded, error));
+    REQUIRE(loaded.map_path == doc.map_path);
+
+    sim::PlayerState restored;
+    sim::restore_player_state(restored, loaded.player);
+    CHECK(restored.health() == 42);
+    CHECK(restored.armor() == 15);
+    CHECK(restored.has_key_red());
+    CHECK(restored.combat().owned[static_cast<std::size_t>(sim::WeaponId::Chaingun)]);
+    CHECK(restored.combat().ammo[static_cast<std::size_t>(sim::AmmoType::Bullets)] == 120);
+    CHECK(restored.x == 128.0f);
+    CHECK(restored.y == 256.0f);
+
+    std::error_code ec;
+    std::filesystem::remove(temp, ec);
 }

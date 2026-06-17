@@ -15,6 +15,8 @@ target_link_libraries(d2df_core
 
 add_library(d2df_core_impl STATIC
     src/core/fixed_timestep.cpp
+    src/core/perf_stats.cpp
+    src/core/resource_audit.cpp
 )
 
 add_library(d2df::core_impl ALIAS d2df_core_impl)
@@ -87,6 +89,7 @@ add_library(d2df_sim STATIC
     src/sim/projectile_types.cpp
     src/sim/player_types.cpp
     src/sim/effect_types.cpp
+    src/sim/game_save.cpp
     src/sim/shootable_target.cpp
     src/sim/trigger_system.cpp
     src/sim/weapon_system.cpp
@@ -190,6 +193,7 @@ if(D2DF_DEBUG_UI)
         src/debug/debug_draw.cpp
         src/debug/debug_ui.cpp
         src/debug/panels/collision_debug_panel.cpp
+        src/debug/panels/perf_debug_panel.cpp
         src/debug/panels/tiles_debug_panel.cpp
     )
 
@@ -203,6 +207,7 @@ if(D2DF_DEBUG_UI)
     target_link_libraries(d2df_debug
         PUBLIC
             d2df::core
+            d2df::core_impl
             d2df::map
             d2df::sim
             d2df::render

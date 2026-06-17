@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace d2df::debug {
 
 struct DebugContext {
@@ -19,6 +21,17 @@ struct DebugContext {
         bool doors = false;
         bool lifts = false;
     } tiles;
+
+    struct PerfFlags {
+        bool show_overlay = true;
+        std::size_t textures_cached = 0;
+        std::size_t sfx_chunks = 0;
+        std::size_t music_tracks = 0;
+        std::size_t projectiles = 0;
+        std::size_t items = 0;
+        std::size_t monsters = 0;
+        std::size_t effects = 0;
+    } perf;
 
     [[nodiscard]] bool any_collision_overlay() const {
         return collision.player || collision.monsters || collision.projectiles;

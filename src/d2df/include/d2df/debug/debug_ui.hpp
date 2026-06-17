@@ -40,6 +40,7 @@ public:
     void render();
 
     [[nodiscard]] const DebugContext& context() const { return context_; }
+    DebugContext& context_mut() { return context_; }
 
 private:
     SDL_Window* window_ = nullptr;

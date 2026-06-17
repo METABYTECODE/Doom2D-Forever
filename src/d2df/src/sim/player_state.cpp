@@ -5,6 +5,7 @@
 
 #include <d2df/map/panel_types.hpp>
 #include <d2df/map/key_types.hpp>
+#include <d2df/sim/game_save.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_types.hpp>
 
@@ -477,6 +478,36 @@ float PlayerState::render_x(float alpha) const {
 
 float PlayerState::render_y(float alpha) const {
     return prev_y + (y - prev_y) * alpha;
+}
+
+void PlayerState::restore_runtime_snapshot(const PlayerStateSnapshot& snap) {
+    tick_ = snap.tick;
+    powerup_suit_until_ = snap.powerup_suit_until;
+    powerup_invul_until_ = snap.powerup_invul_until;
+    powerup_invis_until_ = snap.powerup_invis_until;
+    berserk_until_ = snap.berserk_until;
+    jet_fuel_ = snap.jet_fuel;
+    air_ = snap.air;
+    key_red_ = snap.key_red;
+    key_green_ = snap.key_green;
+    key_blue_ = snap.key_blue;
+    has_backpack_ = snap.has_backpack;
+    jetpack_active_ = snap.jetpack_active;
+    can_jetpack_ = snap.can_jetpack;
+    on_ground_ = snap.on_ground;
+    in_water_ = snap.in_water;
+    in_acid_ = snap.in_acid;
+    on_lift_ = snap.on_lift;
+    run_direction_ = snap.run_direction;
+    pain_ticks_ = snap.pain_ticks;
+    punch_ticks_ = snap.punch_ticks;
+    punch_aim_up_ = snap.punch_aim_up;
+    punch_aim_down_ = snap.punch_aim_down;
+    death_phase_ = snap.death_phase;
+    death_started_tick_ = snap.death_started_tick;
+    death_health_ = snap.death_health;
+    corpse_resolved_ = snap.corpse_resolved;
+    respawn_ticks_remaining_ = snap.respawn_ticks_remaining;
 }
 
 } // namespace d2df::sim

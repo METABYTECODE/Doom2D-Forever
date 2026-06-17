@@ -7,11 +7,13 @@
 #include <spdlog/spdlog.h>
 
 #include <d2df/debug/panels/collision_debug_panel.hpp>
+#include <d2df/debug/panels/perf_debug_panel.hpp>
 #include <d2df/debug/panels/tiles_debug_panel.hpp>
 
 namespace d2df::debug {
 
 DebugUi::DebugUi() {
+    panels_.push_back(std::make_unique<PerfDebugPanel>());
     panels_.push_back(std::make_unique<CollisionDebugPanel>());
     panels_.push_back(std::make_unique<TilesDebugPanel>());
 }

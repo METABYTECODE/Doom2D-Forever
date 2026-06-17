@@ -40,6 +40,8 @@ public:
     static constexpr int kTotalChannels = 16;
 
     [[nodiscard]] bool enabled() const { return enabled_; }
+    [[nodiscard]] std::size_t cached_chunk_count() const { return chunks_.size(); }
+    [[nodiscard]] std::size_t cached_music_count() const { return music_.size(); }
 
 private:
     Mix_Chunk* load_chunk(const char* asset_id);

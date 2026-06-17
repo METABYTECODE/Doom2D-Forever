@@ -15,6 +15,8 @@
 
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
+#include <d2df/core/perf_stats.hpp>
+#include <d2df/core/resource_audit.hpp>
 #include <d2df/map/map_catalog.hpp>
 #include <d2df/core/types.hpp>
 #include <d2df/map/item_types.hpp>
@@ -22,6 +24,7 @@
 #include <d2df/map/monster_types.hpp>
 #include <d2df/sim/item_system.hpp>
 #include <d2df/sim/effect_types.hpp>
+#include <d2df/sim/game_save.hpp>
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/projectile_types.hpp>
 #include <d2df/sim/player_corpse_system.hpp>
@@ -230,7 +233,26 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
     load_map(std::move(map_path));
 }
 
+MapViewer::~MapViewer() {
+    core::log_resource_snapshot(build_resource_snapshot(), "MapViewer shutdown");
+}
+
+core::ResourceSnapshot MapViewer::build_resource_snapshot() const {
+    core::ResourceSnapshot snapshot;
+    if (textures_ != nullptr) {
+        snapshot.textures_cached = textures_->cached_count();
+    }
+    snapshot.sfx_chunks = sound_.cached_chunk_count();
+    snapshot.music_tracks = sound_.cached_music_count();
+    snapshot.projectiles = world_.projectiles().projectiles().size();
+    snapshot.items = world_.items().items().size();
+    snapshot.monsters = world_.targets().size();
+    snapshot.effects = effects_.size();
+    return snapshot;
+}
+
 void MapViewer::load_map(const std::filesystem::path& map_path) {
+    current_map_path_ = map_path;
     map_ = map::load_map_json_v1(map_path);
     textures_ = std::make_unique<render::TextureCache>(renderer_, assets_);
     triggers_.reset(map_);
@@ -312,14 +334,20 @@ void MapViewer::activate_pause_selection() {
         paused_ = false;
         break;
     case 1:
+        save_quicksave();
+        break;
+    case 2:
+        load_quicksave();
+        break;
+    case 3:
         paused_ = false;
         cycle_map(-1);
         break;
-    case 2:
+    case 4:
         paused_ = false;
         cycle_map(1);
         break;
-    case 3:
+    case 5:
         quit_requested_ = true;
         break;
     default:
@@ -327,15 +355,85 @@ void MapViewer::activate_pause_selection() {
     }
 }
 
+std::filesystem::path MapViewer::quicksave_path() const {
+    char* pref = SDL_GetPrefPath("Doom2D", "Forever");
+    if (pref == nullptr) {
+        return std::filesystem::path("quicksave.json");
+    }
+    const std::filesystem::path saves_dir = std::filesystem::path(pref) / "saves";
+    SDL_free(pref);
+    std::error_code ec;
+    std::filesystem::create_directories(saves_dir, ec);
+    return saves_dir / "quicksave.json";
+}
+
+std::string MapViewer::current_map_rel_path() const {
+    std::error_code ec;
+    const auto rel = std::filesystem::relative(current_map_path_, content_root_, ec);
+    if (!ec) {
+        return rel.generic_string();
+    }
+    return current_map_path_.generic_string();
+}
+
+void MapViewer::save_quicksave() {
+    sim::GameSaveDocument doc;
+    sim::capture_world_save(world_, triggers_, current_map_rel_path(), map_.id, doc);
+
+    std::string error;
+    const auto path = quicksave_path();
+    if (!sim::write_game_save(path, doc, error)) {
+        save_status_message_ = "Save failed";
+        spdlog::warn("Quicksave failed: {}", error);
+    } else {
+        save_status_message_ = "Game saved";
+        spdlog::info("Quicksave written to {}", path.string());
+    }
+    save_status_ticks_ = sim::kGameTicksPerSecond * 2;
+}
+
+void MapViewer::load_quicksave() {
+    sim::GameSaveDocument doc;
+    std::string error;
+    const auto path = quicksave_path();
+    if (!sim::read_game_save(path, doc, error)) {
+        save_status_message_ = "No save found";
+        save_status_ticks_ = sim::kGameTicksPerSecond * 2;
+        spdlog::warn("Quicksave load failed: {}", error);
+        return;
+    }
+
+    const std::filesystem::path save_map = content_root_ / doc.map_path;
+    if (save_map != current_map_path_) {
+        try {
+            load_map(save_map);
+        } catch (const std::exception& ex) {
+            save_status_message_ = "Load failed";
+            save_status_ticks_ = sim::kGameTicksPerSecond * 2;
+            spdlog::warn("Quicksave map load failed: {}", ex.what());
+            return;
+        }
+    }
+
+    sim::restore_world_save(world_, triggers_, doc);
+    collision_.build_from_panels(triggers_.panels());
+    continuous_sfx_.reset();
+    effects_.clear();
+    paused_ = false;
+    save_status_message_ = "Game loaded";
+    save_status_ticks_ = sim::kGameTicksPerSecond * 2;
+    spdlog::info("Quicksave loaded from {}", path.string());
+}
+
 void MapViewer::handle_pause_key_down(int sym, SDL_Scancode scancode) {
     switch (scancode) {
     case SDL_SCANCODE_UP:
     case SDL_SCANCODE_W:
-        pause_selection_ = (pause_selection_ + 3) % 4;
+        pause_selection_ = (pause_selection_ + 5) % 6;
         return;
     case SDL_SCANCODE_DOWN:
     case SDL_SCANCODE_S:
-        pause_selection_ = (pause_selection_ + 1) % 4;
+        pause_selection_ = (pause_selection_ + 1) % 6;
         return;
     case SDL_SCANCODE_1:
         pause_selection_ = 0;
@@ -351,6 +449,14 @@ void MapViewer::handle_pause_key_down(int sym, SDL_Scancode scancode) {
         return;
     case SDL_SCANCODE_4:
         pause_selection_ = 3;
+        activate_pause_selection();
+        return;
+    case SDL_SCANCODE_5:
+        pause_selection_ = 4;
+        activate_pause_selection();
+        return;
+    case SDL_SCANCODE_6:
+        pause_selection_ = 5;
         activate_pause_selection();
         return;
     default:
@@ -387,6 +493,12 @@ void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
     case SDL_SCANCODE_RIGHTBRACKET:
     case SDL_SCANCODE_PAGEDOWN:
         cycle_map(1);
+        return;
+    case SDL_SCANCODE_F5:
+        save_quicksave();
+        return;
+    case SDL_SCANCODE_F9:
+        load_quicksave();
         return;
     case SDL_SCANCODE_1:
         weapon_select_request_ = static_cast<int>(sim::WeaponId::Knuckles);
@@ -537,6 +649,7 @@ void MapViewer::handle_mouse_wheel(int y) {
 }
 
 void MapViewer::fixed_update() {
+    core::ScopedPerfRegion sim_scope(core::PerfRegion::SimFixed);
     if (free_camera_) {
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         float dx = 0.0f;
@@ -581,10 +694,16 @@ void MapViewer::fixed_update() {
 
     auto& player = world_.player();
     const bool fire_held = input.fire;
-    collision_.build_from_panels(triggers_.panels());
+    {
+        core::ScopedPerfRegion collision_scope(core::PerfRegion::SimCollision);
+        collision_.build_from_panels(triggers_.panels());
+    }
     world_.fixed_update(collision_, input, events_, map_.size.width, map_.size.height, &triggers_);
     triggers_.update(player, key_use_edge_, events_, &world_.targets(), &collision_);
-    collision_.build_from_panels(triggers_.panels());
+    {
+        core::ScopedPerfRegion collision_scope(core::PerfRegion::SimCollision);
+        collision_.build_from_panels(triggers_.panels());
+    }
     key_use_edge_ = false;
 
     continuous_sfx_.tick(world_.player(), world_.player().combat(), fire_held);
@@ -599,6 +718,10 @@ void MapViewer::fixed_update() {
             events_->publish(events::MapExitRequested{});
         }
         cycle_map(1);
+    }
+
+    if (save_status_ticks_ > 0) {
+        --save_status_ticks_;
     }
 
     tick_effects();
@@ -644,13 +767,17 @@ void MapViewer::update_camera_follow(float render_alpha) {
 }
 
 void MapViewer::update(float frame_dt) {
+    core::ScopedPerfRegion update_scope(core::PerfRegion::MapUpdate);
     if (paused_) {
         return;
     }
     fixed_timestep_.advance(frame_dt);
+    std::uint32_t steps = 0;
     while (fixed_timestep_.consume_fixed_step()) {
         fixed_update();
+        ++steps;
     }
+    core::PerfStats::instance().set_sim_steps(steps);
 }
 
 void MapViewer::draw_sky(int viewport_w, int viewport_h) {
@@ -1522,8 +1649,12 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
     }
 
     const std::string footer = map_.name + "  [" + std::to_string(map_index_ + 1) + "/" +
-                               std::to_string(map_list_.size()) + "]  ESC pause  Q/E weapons";
+                               std::to_string(map_list_.size()) +
+                               "]  ESC pause  F5 save  F9 load  Q/E weapons";
     text_.draw(renderer_, footer, 8, viewport_h - 20, 180, 180, 190);
+    if (save_status_ticks_ > 0) {
+        text_.draw(renderer_, save_status_message_, 8, viewport_h - 36, 120, 220, 140);
+    }
 }
 
 void MapViewer::draw_pause_menu(int viewport_w, int viewport_h) {
@@ -1534,11 +1665,13 @@ void MapViewer::draw_pause_menu(int viewport_w, int viewport_h) {
 
     static constexpr const char* kItems[] = {
         "Resume",
+        "Save game",
+        "Load game",
         "Previous map",
         "Next map",
         "Quit game",
     };
-    static constexpr int kItemCount = 4;
+    static constexpr int kItemCount = 6;
 
     const int line_height = 22;
     const int panel_height = 28 + kItemCount * line_height;
@@ -1590,7 +1723,16 @@ void MapViewer::draw_player_overlays(int viewport_w, int viewport_h) {
     draw_tint(sim::player_pain_overlay(player));
 }
 
+void MapViewer::draw_perf_overlay(int viewport_w, int /*viewport_h*/) {
+    const auto& stats = core::PerfStats::instance();
+    const std::string line =
+        "FPS " + std::to_string(static_cast<int>(stats.fps())) + "  " +
+        std::to_string(static_cast<int>(stats.frame_ms())) + " ms";
+    text_.draw(renderer_, line, viewport_w - text_.measure_width(line) - 8, 8, 220, 220, 230);
+}
+
 void MapViewer::render(int viewport_w, int viewport_h) {
+    core::ScopedPerfRegion render_scope(core::PerfRegion::MapRender);
     update_camera_follow(fixed_timestep_.render_alpha());
 
     const int game_w = render::game_viewport_width(viewport_w);
@@ -1598,23 +1740,35 @@ void MapViewer::render(int viewport_w, int viewport_h) {
     SDL_SetRenderDrawColor(renderer_, 20, 15, 26, 255);
     SDL_RenderClear(renderer_);
 
-    draw_sky(game_w, viewport_h);
-    map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, game_w,
-                       viewport_h);
-    draw_items(game_w, viewport_h, false);
-    draw_player(game_w, viewport_h);
-    draw_player_corpses(game_w, viewport_h);
-    draw_targets(game_w, viewport_h);
-    draw_items(game_w, viewport_h, true);
-    draw_projectiles(game_w, viewport_h);
-    draw_effects(game_w, viewport_h);
+    {
+        core::ScopedPerfRegion world_scope(core::PerfRegion::MapRenderWorld);
+        draw_sky(game_w, viewport_h);
+        map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, game_w,
+                           viewport_h);
+        draw_items(game_w, viewport_h, false);
+        draw_player(game_w, viewport_h);
+        draw_player_corpses(game_w, viewport_h);
+        draw_targets(game_w, viewport_h);
+        draw_items(game_w, viewport_h, true);
+        draw_projectiles(game_w, viewport_h);
+        draw_effects(game_w, viewport_h);
 #if D2DF_DEBUG_UI
-    draw_debug_overlays(game_w, viewport_h);
+        draw_debug_overlays(game_w, viewport_h);
 #endif
-    draw_player_overlays(viewport_w, viewport_h);
-    draw_hud(viewport_w, viewport_h);
-    if (paused_) {
-        draw_pause_menu(viewport_w, viewport_h);
+        draw_player_overlays(viewport_w, viewport_h);
+    }
+
+    {
+        core::ScopedPerfRegion hud_scope(core::PerfRegion::MapRenderHud);
+        draw_hud(viewport_w, viewport_h);
+        if (paused_) {
+            draw_pause_menu(viewport_w, viewport_h);
+        }
+#if D2DF_DEBUG_UI
+        if (debug_ui_ != nullptr && debug_ui_->context().perf.show_overlay) {
+            draw_perf_overlay(viewport_w, viewport_h);
+        }
+#endif
     }
 }
 
@@ -1623,6 +1777,16 @@ void MapViewer::draw_debug_overlays(int viewport_w, int viewport_h) {
     if (debug_ui_ == nullptr) {
         return;
     }
+
+    const auto snapshot = build_resource_snapshot();
+    auto& perf = debug_ui_->context_mut().perf;
+    perf.textures_cached = snapshot.textures_cached;
+    perf.sfx_chunks = snapshot.sfx_chunks;
+    perf.music_tracks = snapshot.music_tracks;
+    perf.projectiles = snapshot.projectiles;
+    perf.items = snapshot.items;
+    perf.monsters = snapshot.monsters;
+    perf.effects = snapshot.effects;
 
     const debug::DebugWorldView world{
         world_.player(),

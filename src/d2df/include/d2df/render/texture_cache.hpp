@@ -20,6 +20,7 @@ public:
 
     [[nodiscard]] SDL_Texture* get(std::string_view asset_id);
     [[nodiscard]] SDL_Texture* builtin(std::string_view ref);
+    [[nodiscard]] std::size_t cached_count() const { return textures_.size(); }
 
 private:
     SDL_Texture* load_png(std::string_view asset_id);

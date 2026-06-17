@@ -7,6 +7,7 @@ add_executable(d2df_tests
     test_organize.cpp
     test_map_import.cpp
     test_map_viewer.cpp
+    test_perf.cpp
     test_sim.cpp
 )
 

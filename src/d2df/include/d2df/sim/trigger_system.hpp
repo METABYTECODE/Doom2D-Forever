@@ -2,6 +2,7 @@
 
 #include <d2df/core/game_events.hpp>
 #include <d2df/map/map_document.hpp>
+#include <d2df/sim/game_save.hpp>
 #include <d2df/sim/lift_system.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
@@ -35,6 +36,9 @@ public:
     [[nodiscard]] bool consume_exit_request();
     [[nodiscard]] const std::vector<map::MapPanel>& panels() const { return panels_; }
     [[nodiscard]] map::MapDocument map_view(const map::MapDocument& base) const;
+
+    void export_save_state(GameSaveDocument& out) const;
+    void import_save_state(const GameSaveDocument& in);
 
 private:
     void init_panel_defaults();

@@ -3,6 +3,7 @@
 #include <d2df/map/item_types.hpp>
 #include <d2df/map/map_document.hpp>
 #include <d2df/sim/game_rules.hpp>
+#include <d2df/sim/game_save.hpp>
 #include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/player_state.hpp>
 
@@ -55,6 +56,9 @@ public:
 
     [[nodiscard]] const std::vector<WorldItem>& items() const { return items_; }
     [[nodiscard]] const GameRules& rules() const { return rules_; }
+
+    void export_save_state(std::vector<WorldItemSnapshot>& out) const;
+    void import_save_state(const std::vector<WorldItemSnapshot>& in);
 
 private:
     std::vector<WorldItem> items_;

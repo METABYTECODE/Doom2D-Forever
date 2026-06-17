@@ -40,7 +40,9 @@ public:
     [[nodiscard]] const sim::ProjectileSystem& projectiles() const { return projectiles_; }
     [[nodiscard]] sim::ProjectileSystem& projectiles() { return projectiles_; }
     [[nodiscard]] const sim::ItemSystem& items() const { return items_; }
+    [[nodiscard]] sim::ItemSystem& items() { return items_; }
     [[nodiscard]] const sim::PlayerCorpseSystem& player_corpses() const { return player_corpses_; }
+    [[nodiscard]] sim::PlayerCorpseSystem& player_corpses() { return player_corpses_; }
     [[nodiscard]] entt::registry& registry() { return registry_; }
     [[nodiscard]] EntityId player_entity_id() const { return kPlayerEntityId; }
 

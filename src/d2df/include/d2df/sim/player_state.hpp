@@ -8,6 +8,8 @@ namespace d2df::sim {
 
 class MapCollision;
 
+struct PlayerStateSnapshot;
+
 enum class PlayerDeathPhase {
     None,
     Die1,
@@ -111,6 +113,7 @@ struct PlayerState {
     bool add_health(int amount, int max_health);
     void set_health(int value);
     void set_armor(int value);
+    void restore_runtime_snapshot(const PlayerStateSnapshot& snap);
   /// @return false if the player already has this key.
     bool give_key_red();
     bool give_key_green();

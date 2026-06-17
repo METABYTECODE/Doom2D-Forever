@@ -20,6 +20,8 @@
 #include <d2df/app/map_viewer.hpp>
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/game_events.hpp>
+#include <d2df/core/perf_stats.hpp>
+#include <d2df/core/resource_audit.hpp>
 #include <d2df/core/log.hpp>
 #include <d2df/core/service_registry.hpp>
 #include <d2df/net/local_simulation_authority.hpp>
@@ -166,9 +168,10 @@ bool GameApp::init_map_viewer() {
 }
 
 void GameApp::process_frame() {
-    const auto now = std::chrono::steady_clock::now();
-    const float dt = std::chrono::duration<float>(now - last_tick_).count();
-    last_tick_ = now;
+    core::PerfStats::instance().begin_frame();
+    const auto frame_start = std::chrono::steady_clock::now();
+    const float dt = std::chrono::duration<float>(frame_start - last_tick_).count();
+    last_tick_ = frame_start;
 
     services_->get<INetworkTransport>().poll();
     events_->publish(events::FrameTick{dt});
@@ -179,6 +182,7 @@ void GameApp::process_frame() {
 
 #if D2DF_DEBUG_UI
     if (debug_ui_) {
+        core::ScopedPerfRegion debug_scope(core::PerfRegion::DebugUi);
         debug_ui_->begin_frame();
     }
 #endif
@@ -193,11 +197,16 @@ void GameApp::process_frame() {
 
 #if D2DF_DEBUG_UI
     if (debug_ui_) {
+        core::ScopedPerfRegion debug_scope(core::PerfRegion::DebugUi);
         debug_ui_->render();
     }
 #endif
 
     SDL_RenderPresent(renderer_);
+
+    const auto frame_end = std::chrono::steady_clock::now();
+    const double wall_seconds = std::chrono::duration<double>(frame_end - frame_start).count();
+    core::PerfStats::instance().end_frame(wall_seconds);
 }
 
 int GameApp::run() {
@@ -294,6 +303,9 @@ int GameApp::run() {
     }
 
     events_->publish(events::AppShutdown{});
+    if (map_viewer_) {
+        core::log_resource_snapshot(map_viewer_->build_resource_snapshot(), "GameApp shutdown");
+    }
     spdlog::info("Shutdown");
     return 0;
 }

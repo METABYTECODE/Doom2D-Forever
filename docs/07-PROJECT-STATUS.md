@@ -1,6 +1,6 @@
 # 07 — Статус проекта (handoff)
 
-> **Обновлено:** 2026-06-16  
+> **Обновлено:** 2026-06-17  
 > Документ для продолжения работы в новом чате. Читать **первым** после `docs/README.md`.
 
 ---
@@ -15,8 +15,12 @@
 | **Phase 2b** — maps + AssetDatabase | ✅ **Готово** |
 | **Phase 3** — map viewer (SDL MVP) | ✅ **Готово** |
 | **Phase 4** — physics & player | ✅ **Готово** |
+| **Phase 5** — combat (weapons, projectiles) | ✅ **Готово** |
+| **Phase 6** — monsters, items, triggers | ✅ **Готово** |
+| **Phase 7** — HUD, audio, pause menu | ✅ **Готово** (звук — доработки позже) |
+| **Phase 8** — polish | 🔄 **В работе** (perf + leaks; bots/COOP отложены) |
 
-**Следующий шаг:** Phase 5 — weapons, projectiles, combat events.
+**Следующий шаг:** Phase 8 — performance profiling, leak checks. Bots/COOP/MP — после rewrite.
 
 ---
 
@@ -267,13 +271,29 @@ REM или: build\src\d2df_client\Release\d2df.exe --map assets\content\maps\doo
 | EventBus: PlayerLanded, liquid, damage, MapExit | ✅ |
 | Slope climb | ✅ базово |
 
-**Следующий шаг:** Phase 5 — combat (weapons, projectiles, HP UI).
+---
+
+## Phase 5–7 — завершено ✅
+
+Combat (weapons, projectiles, monster AI), world sim (items, triggers, corpses), HUD, pause menu, SFX/music playback, player sprites/death.
+
+Отложено в Phase 7: консоль, content fonts, main menu, scoreboard.
 
 ---
 
-## Phase 5+ — не начато ❌
+## Phase 8 — в работе 🔄
 
-Combat, UI, audio playback, bots, MP (Phase 9).
+| Задача | Статус |
+|--------|--------|
+| JSON save/load (quicksave F5/F9) | ✅ v1 |
+| **Performance profiling** (FPS, region timings) | ✅ |
+| **Resource audit** (textures/audio counts, shutdown log) | ✅ |
+| **MSVC CRT leak check** (Debug builds) | ✅ |
+| Bots / local COOP | ⏸ отложено (сетевой rewrite) |
+
+**Profiling:** Insert → Debug → **Performance** tab. FPS overlay in-game when enabled.
+
+**Leak check:** Debug `d2df.exe` reports CRT leaks on exit when `D2DF_LEAK_CHECK=ON`.
 
 ---
 
