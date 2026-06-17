@@ -5,7 +5,6 @@
 namespace d2df::sim {
 namespace {
 
-constexpr int kDefaultMaxAmmo[] = {200, 50, 50, 300, 100};
 constexpr int kWeaponReloadTicks[] = {5, 2, 6, 18, 36, 2, 12, 2, 14, 2, 2};
 
 AmmoType ammo_for_weapon(WeaponId weapon) {
@@ -85,9 +84,9 @@ const char* weapon_display_name(WeaponId weapon) {
 const char* weapon_fire_sfx(WeaponId weapon) {
     switch (weapon) {
     case WeaponId::Knuckles:
-        return "sfx.world.hitpunch";
+        return nullptr;
     case WeaponId::Saw:
-        return "sfx.world.firesaw";
+        return nullptr;
     case WeaponId::Pistol:
         return "sfx.world.firepistol";
     case WeaponId::Shotgun1:
@@ -103,9 +102,9 @@ const char* weapon_fire_sfx(WeaponId weapon) {
     case WeaponId::Bfg:
         return "sfx.world.firebfg";
     case WeaponId::SuperChaingun:
-        return "sfx.world.firerev";
+        return "sfx.world.fireshotgun";
     case WeaponId::Flamethrower:
-        return "sfx.world.flameloop";
+        return nullptr;
     default:
         return nullptr;
     }

@@ -51,6 +51,8 @@ public:
     void spawn_monster_drop(map::ItemType type, float center_x, float center_y, int vel_x,
                             int vel_y);
 
+    void spawn_player_death_loot(const PlayerState& player);
+
     [[nodiscard]] const std::vector<WorldItem>& items() const { return items_; }
     [[nodiscard]] const GameRules& rules() const { return rules_; }
 

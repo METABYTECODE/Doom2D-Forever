@@ -6,6 +6,7 @@
 #include <d2df/sim/item_system.hpp>
 #include <d2df/sim/monster_system.hpp>
 #include <d2df/sim/map_collision.hpp>
+#include <d2df/sim/player_corpse_system.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/shootable_target.hpp>
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] const sim::ProjectileSystem& projectiles() const { return projectiles_; }
     [[nodiscard]] sim::ProjectileSystem& projectiles() { return projectiles_; }
     [[nodiscard]] const sim::ItemSystem& items() const { return items_; }
+    [[nodiscard]] const sim::PlayerCorpseSystem& player_corpses() const { return player_corpses_; }
     [[nodiscard]] entt::registry& registry() { return registry_; }
     [[nodiscard]] EntityId player_entity_id() const { return kPlayerEntityId; }
 
@@ -53,6 +55,8 @@ private:
     void purge_dead_monsters();
     void handle_monster_death_effects(const sim::MapCollision& collision, EventBus* events,
                                       sim::TriggerSystem* triggers);
+    void handle_player_death_loot();
+    void handle_player_death_corpse(int map_height);
 
     entt::registry registry_;
     entt::entity player_entity_{entt::null};
@@ -60,10 +64,12 @@ private:
     sim::WeaponSystem weapons_;
     sim::ProjectileSystem projectiles_;
     sim::ItemSystem items_;
+    sim::PlayerCorpseSystem player_corpses_;
     sim::MonsterSystem monsters_;
     std::vector<sim::ShootableTarget> targets_;
     EntityId next_monster_id_ = kDebugTargetBaseId;
     std::optional<map::MapPoint> spawn_point_;
+    bool death_loot_handled_ = false;
 };
 
 } // namespace d2df::ecs

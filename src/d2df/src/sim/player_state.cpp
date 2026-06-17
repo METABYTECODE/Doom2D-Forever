@@ -46,6 +46,7 @@ void PlayerState::reset_to_spawn(float spawn_x, float spawn_y) {
     key_red_ = false;
     key_green_ = false;
     key_blue_ = false;
+    has_backpack_ = false;
     powerup_suit_until_ = 0;
     powerup_invul_until_ = 0;
     powerup_invis_until_ = 0;
@@ -85,6 +86,22 @@ bool PlayerState::has_invis() const {
 
 bool PlayerState::has_berserk() const {
     return tick_ < berserk_until_;
+}
+
+int PlayerState::powerup_suit_ticks_remaining() const {
+    return std::max(0, powerup_suit_until_ - tick_);
+}
+
+int PlayerState::powerup_invul_ticks_remaining() const {
+    return std::max(0, powerup_invul_until_ - tick_);
+}
+
+int PlayerState::powerup_invis_ticks_remaining() const {
+    return std::max(0, powerup_invis_until_ - tick_);
+}
+
+int PlayerState::berserk_ticks_remaining() const {
+    return std::max(0, berserk_until_ - tick_);
 }
 
 void PlayerState::give_suit() {
@@ -145,11 +162,16 @@ bool PlayerState::apply_damage(int amount) {
         return false;
     }
 
-    health_ = std::max(0, health_ - remaining);
-    if (!alive()) {
+    health_ -= remaining;
+    if (health_ <= 0) {
+        death_health_ = health_;
+        health_ = 0;
         pain_ticks_ = 0;
-        death_phase_ = PlayerDeathPhase::Die1;
+        death_phase_ = death_health_ <= kPlayerDieHardHealthThreshold ? PlayerDeathPhase::Die2
+                                                                      : PlayerDeathPhase::Die1;
         death_started_tick_ = tick_;
+        corpse_resolved_ = false;
+        respawn_ticks_remaining_ = kPlayerRespawnTicks;
     }
     return !alive();
 }
@@ -158,16 +180,39 @@ void PlayerState::tick_corpse() {
     begin_tick();
     ++tick_;
 
+    if (respawn_ticks_remaining_ > 0) {
+        --respawn_ticks_remaining_;
+    }
+
     if (death_phase_ == PlayerDeathPhase::Die1 &&
         tick_ - death_started_tick_ >= kPlayerDie1Ticks) {
         death_phase_ = PlayerDeathPhase::Die2;
     }
 }
 
+void PlayerState::mark_corpse_resolved() {
+    corpse_resolved_ = true;
+}
+
 void PlayerState::reset_death_state() {
     pain_ticks_ = 0;
+    punch_ticks_ = 0;
+    punch_aim_up_ = false;
+    punch_aim_down_ = false;
     death_phase_ = PlayerDeathPhase::None;
     death_started_tick_ = 0;
+    death_health_ = 0;
+    corpse_resolved_ = false;
+    respawn_ticks_remaining_ = 0;
+}
+
+void PlayerState::start_punch(bool aim_up, bool aim_down) {
+    if (!alive()) {
+        return;
+    }
+    punch_ticks_ = kPlayerPunchFrames;
+    punch_aim_up_ = aim_up;
+    punch_aim_down_ = aim_down;
 }
 
 void PlayerState::restore_health() {
@@ -200,6 +245,10 @@ bool PlayerState::give_key_blue() {
     }
     key_blue_ = true;
     return true;
+}
+
+void PlayerState::give_backpack() {
+    has_backpack_ = true;
 }
 
 bool PlayerState::add_health(int amount, int max_health) {
@@ -307,6 +356,10 @@ void PlayerState::fixed_update(const MapCollision& collision, PlayerInput input)
 
     if (pain_ticks_ > 0) {
         --pain_ticks_;
+    }
+
+    if (punch_ticks_ > 0) {
+        --punch_ticks_;
     }
 
     if (physics_tick) {

@@ -21,7 +21,7 @@ bool SoundSystem::init() {
         spdlog::warn("SoundSystem: Mix_OpenAudio failed: {}", Mix_GetError());
         return false;
     }
-    Mix_AllocateChannels(16);
+    Mix_AllocateChannels(kTotalChannels);
     enabled_ = true;
     spdlog::info("SoundSystem: SDL_mixer initialized");
     return true;
@@ -117,7 +117,49 @@ void SoundSystem::play(const char* asset_id) {
     if (chunk == nullptr) {
         return;
     }
-    Mix_PlayChannel(-1, chunk, 0);
+
+    // Legacy g_Sound_PlayExAt: each shot on a free mixer channel (overlapping layers).
+    for (int channel = kReservedLoopChannels; channel < kTotalChannels; ++channel) {
+        if (Mix_Playing(channel) == 0) {
+            Mix_PlayChannel(channel, chunk, 0);
+            return;
+        }
+    }
+
+    Mix_PlayChannel(kReservedLoopChannels, chunk, 0);
+}
+
+bool SoundSystem::play_channel(int channel, const char* asset_id, int loops) {
+    if (!enabled_ || channel < 0 || channel >= kReservedLoopChannels) {
+        return false;
+    }
+
+    Mix_Chunk* chunk = load_chunk(asset_id);
+    if (chunk == nullptr) {
+        return false;
+    }
+
+    Mix_HaltChannel(channel);
+
+    if (Mix_PlayChannel(channel, chunk, loops) == -1) {
+        spdlog::debug("SoundSystem: Mix_PlayChannel failed for {} ({})", asset_id, Mix_GetError());
+        return false;
+    }
+    return true;
+}
+
+void SoundSystem::stop_channel(int channel) {
+    if (!enabled_ || channel < 0 || channel >= kReservedLoopChannels) {
+        return;
+    }
+    Mix_HaltChannel(channel);
+}
+
+bool SoundSystem::is_channel_playing(int channel) const {
+    if (!enabled_ || channel < 0 || channel >= kReservedLoopChannels) {
+        return false;
+    }
+    return Mix_Playing(channel) != 0;
 }
 
 void SoundSystem::play_music(const char* asset_id, int loops) {

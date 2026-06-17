@@ -263,6 +263,8 @@ ItemSprite item_sprite(ItemType type) {
     case ItemType::Invul:
     case ItemType::Invis:
         return {type == ItemType::Invul ? "tex.ui.invul" : "tex.ui.invis", 32, 32, 4, 20};
+    case ItemType::WeaponKnuckles:
+        return {"tex.ui.knuckles", 0, 0};
     case ItemType::WeaponSaw:
         return {"tex.ui.saw", 0, 0};
     case ItemType::WeaponShotgun1:

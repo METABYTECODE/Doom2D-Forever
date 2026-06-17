@@ -24,8 +24,10 @@
 #include <d2df/sim/effect_types.hpp>
 #include <d2df/sim/projectile_system.hpp>
 #include <d2df/sim/projectile_types.hpp>
+#include <d2df/sim/player_corpse_system.hpp>
 #include <d2df/sim/player_types.hpp>
 #include <d2df/sim/weapon_types.hpp>
+#include <d2df/render/hud_layout.hpp>
 
 namespace d2df {
 namespace {
@@ -101,6 +103,7 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
     sound_.set_content_root(content_root_);
     sound_.bind_assets(assets_);
     if (sound_.init()) {
+        continuous_sfx_.bind(&sound_);
         if (events_ != nullptr) {
             events_->subscribe<events::ItemPickedUp>([this](const events::ItemPickedUp& event) {
                 const auto item_type = static_cast<map::ItemType>(event.item_type);
@@ -119,6 +122,23 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                     return;
                 }
                 const auto weapon = static_cast<sim::WeaponId>(event.weapon);
+                if (weapon == sim::WeaponId::Knuckles) {
+                    sound_.play(event.melee_hit ? "sfx.world.hitpunch" : "sfx.world.misspunch");
+                    return;
+                }
+                if (weapon == sim::WeaponId::Saw) {
+                    continuous_sfx_.on_saw_fire(event.melee_hit);
+                    return;
+                }
+                if (weapon == sim::WeaponId::Bfg) {
+                    const auto& combat = world_.player().combat();
+                    if (combat.bfg_charge_ticks > 0) {
+                        sound_.play("sfx.world.startfirebfg");
+                    } else {
+                        sound_.play("sfx.world.firebfg");
+                    }
+                    return;
+                }
                 if (const char* sfx = sim::weapon_fire_sfx(weapon)) {
                     sound_.play(sfx);
                 }
@@ -180,6 +200,28 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                 } else {
                     sound_.play("sfx.world.hit");
                 }
+                if (event.health_remaining > 0) {
+                    if (const char* pain_sfx = sim::player_model_pain_sfx(
+                            event.amount, world_.player().tick())) {
+                        sound_.play(pain_sfx);
+                    }
+                }
+            });
+            events_->subscribe<events::PlayerDied>([this](const events::PlayerDied&) {
+                if (const char* sfx = sim::player_model_death_sfx()) {
+                    sound_.play(sfx);
+                }
+            });
+            events_->subscribe<events::PlayerLanded>([this](const events::PlayerLanded&) {
+                const auto& player = world_.player();
+                if (!player.in_water()) {
+                    return;
+                }
+                const int impact = std::abs(player.vel_x) + std::abs(player.vel_y);
+                if (impact <= 4) {
+                    return;
+                }
+                sound_.play(impact < 10 ? "sfx.world.bulk1" : "sfx.world.bulk2");
             });
         }
     }
@@ -202,6 +244,7 @@ void MapViewer::load_map(const std::filesystem::path& map_path) {
     map_index_ = find_map_index(map_list_, map_path);
 
     effects_.clear();
+    continuous_sfx_.reset();
 
     spdlog::info("Map [{}/{}]: {} ({}x{}, {} panels, {} areas)", map_index_ + 1,
                  map_list_.size(), map_.name, map_.size.width, map_.size.height, map_.panels.size(),
@@ -236,7 +279,106 @@ void MapViewer::cycle_map(int direction) {
     } while (map_index_ != start_index);
 }
 
+void MapViewer::clear_input_state() {
+    key_left_ = false;
+    key_right_ = false;
+    key_jump_ = false;
+    key_use_ = false;
+    key_use_edge_ = false;
+    key_aim_up_ = false;
+    key_aim_down_ = false;
+    key_weapon_prev_ = false;
+    weapon_select_request_ = -1;
+}
+
+void MapViewer::toggle_pause() {
+    paused_ = !paused_;
+    if (paused_) {
+        pause_selection_ = 0;
+        clear_input_state();
+        continuous_sfx_.reset();
+    }
+}
+
+bool MapViewer::consume_quit_request() {
+    const bool requested = quit_requested_;
+    quit_requested_ = false;
+    return requested;
+}
+
+void MapViewer::activate_pause_selection() {
+    switch (pause_selection_) {
+    case 0:
+        paused_ = false;
+        break;
+    case 1:
+        paused_ = false;
+        cycle_map(-1);
+        break;
+    case 2:
+        paused_ = false;
+        cycle_map(1);
+        break;
+    case 3:
+        quit_requested_ = true;
+        break;
+    default:
+        break;
+    }
+}
+
+void MapViewer::handle_pause_key_down(int sym, SDL_Scancode scancode) {
+    switch (scancode) {
+    case SDL_SCANCODE_UP:
+    case SDL_SCANCODE_W:
+        pause_selection_ = (pause_selection_ + 3) % 4;
+        return;
+    case SDL_SCANCODE_DOWN:
+    case SDL_SCANCODE_S:
+        pause_selection_ = (pause_selection_ + 1) % 4;
+        return;
+    case SDL_SCANCODE_1:
+        pause_selection_ = 0;
+        activate_pause_selection();
+        return;
+    case SDL_SCANCODE_2:
+        pause_selection_ = 1;
+        activate_pause_selection();
+        return;
+    case SDL_SCANCODE_3:
+        pause_selection_ = 2;
+        activate_pause_selection();
+        return;
+    case SDL_SCANCODE_4:
+        pause_selection_ = 3;
+        activate_pause_selection();
+        return;
+    default:
+        break;
+    }
+
+    switch (sym) {
+    case SDLK_ESCAPE:
+    case SDLK_p:
+    case SDLK_RETURN:
+    case SDLK_KP_ENTER:
+        if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER) {
+            activate_pause_selection();
+        } else {
+            paused_ = false;
+        }
+        break;
+    default:
+        break;
+    }
+}
+
 void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
+    if (paused_) {
+        handle_pause_key_down(sym, scancode);
+        return;
+    }
+
     switch (scancode) {
     case SDL_SCANCODE_LEFTBRACKET:
     case SDL_SCANCODE_PAGEUP:
@@ -349,6 +491,9 @@ void MapViewer::handle_key_down(int sym, SDL_Scancode scancode) {
 }
 
 void MapViewer::handle_key_up(int sym) {
+    if (paused_) {
+        return;
+    }
     switch (sym) {
     case SDLK_a:
     case SDLK_LEFT:
@@ -381,6 +526,9 @@ void MapViewer::handle_key_up(int sym) {
 }
 
 void MapViewer::handle_mouse_wheel(int y) {
+    if (paused_) {
+        return;
+    }
     if (y > 0) {
         camera_.zoom_in();
     } else if (y < 0) {
@@ -432,14 +580,18 @@ void MapViewer::fixed_update() {
     key_weapon_prev_ = false;
 
     auto& player = world_.player();
+    const bool fire_held = input.fire;
     collision_.build_from_panels(triggers_.panels());
     world_.fixed_update(collision_, input, events_, map_.size.width, map_.size.height, &triggers_);
     triggers_.update(player, key_use_edge_, events_, &world_.targets(), &collision_);
     collision_.build_from_panels(triggers_.panels());
     key_use_edge_ = false;
 
-    if (!player.alive()) {
+    continuous_sfx_.tick(world_.player(), world_.player().combat(), fire_held);
+
+    if (world_.player().ready_to_respawn()) {
         world_.respawn_player();
+        continuous_sfx_.reset();
     }
 
     if (triggers_.consume_exit_request()) {
@@ -457,11 +609,44 @@ void MapViewer::update_camera_follow(float render_alpha) {
         return;
     }
     const auto& player = world_.player();
+    if (!player.alive() && player.corpse_resolved()) {
+        for (const auto& corpse : world_.player_corpses().corpses()) {
+            if (!corpse.active) {
+                continue;
+            }
+            const float corpse_x = corpse.prev_x + (corpse.x - corpse.prev_x) * render_alpha;
+            const float corpse_y = corpse.prev_y + (corpse.y - corpse.prev_y) * render_alpha;
+            camera_.center_x = corpse_x + player.width * 0.5f;
+            camera_.center_y = corpse_y + player.height * 0.5f;
+            return;
+        }
+
+        float gib_x = 0.0f;
+        float gib_y = 0.0f;
+        int active_gibs = 0;
+        for (const auto& gib : world_.player_corpses().gibs()) {
+            if (!gib.active) {
+                continue;
+            }
+            gib_x += gib.prev_x + (gib.x - gib.prev_x) * render_alpha;
+            gib_y += gib.prev_y + (gib.y - gib.prev_y) * render_alpha;
+            ++active_gibs;
+        }
+        if (active_gibs > 0) {
+            camera_.center_x = gib_x / static_cast<float>(active_gibs);
+            camera_.center_y = gib_y / static_cast<float>(active_gibs);
+            return;
+        }
+    }
+
     camera_.center_x = player.render_x(render_alpha) + player.width * 0.5f;
     camera_.center_y = player.render_y(render_alpha) + player.height * 0.5f;
 }
 
 void MapViewer::update(float frame_dt) {
+    if (paused_) {
+        return;
+    }
     fixed_timestep_.advance(frame_dt);
     while (fixed_timestep_.consume_fixed_step()) {
         fixed_update();
@@ -573,6 +758,10 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
     }
 
     const auto& player = world_.player();
+    if (!player.alive() && player.corpse_resolved()) {
+        return;
+    }
+
     const float alpha = fixed_timestep_.render_alpha();
     const float hitbox_x = player.render_x(alpha);
     const float hitbox_y = player.render_y(alpha);
@@ -585,10 +774,43 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
     const auto sprite_set = sim::player_sprite_set(anim);
     const auto placement =
         sim::player_sprite_placement(hitbox_x, hitbox_y, combat.facing_left);
+    const int anim_tick =
+        player.alive() ? player.tick() : player.tick() - player.death_started_tick();
     const int frame_index =
-        sim::player_anim_frame_index(anim, player.tick(), player.vel_x);
-    const Uint8 draw_alpha = player.has_invis() ? 200 : 255;
+        sim::player_anim_frame_index(anim, anim_tick, player.vel_x);
+    const Uint8 draw_alpha = sim::player_draw_alpha(player);
     const auto team_color = sim::default_player_team_color();
+
+    if (player.alive() && player.punch_ticks() > 0) {
+        if (const char* punch_texture = sim::player_punch_texture_id(
+                player.punch_aim_up(), player.punch_aim_down(), player.has_berserk())) {
+            const auto punch_placement = sim::player_punch_placement(
+                hitbox_x, hitbox_y, combat.facing_left);
+            const int punch_frame =
+                sim::player_punch_frame_index(player.punch_ticks());
+            (void)draw_player_layer(renderer_, textures_.get(), camera_, viewport_w, viewport_h,
+                                    punch_texture, punch_placement.x, punch_placement.y, 64, 64,
+                                    sim::kPlayerPunchFrames, punch_frame,
+                                    punch_placement.flip_horizontal, draw_alpha, false, 255, 255,
+                                    255);
+        }
+    }
+
+    if (player.alive() && sim::player_invul_penta_visible(player)) {
+        if (SDL_Texture* penta_texture = textures_->get("tex.ui.penta")) {
+            int penta_w = 0;
+            int penta_h = 0;
+            SDL_QueryTexture(penta_texture, nullptr, nullptr, &penta_w, &penta_h);
+            if (penta_w > 0 && penta_h > 0) {
+                const auto penta_placement = sim::player_invul_penta_placement(
+                    hitbox_x, hitbox_y, combat.facing_left, penta_w, penta_h);
+                (void)draw_player_layer(renderer_, textures_.get(), camera_, viewport_w, viewport_h,
+                                        "tex.ui.penta", penta_placement.x, penta_placement.y, 0, 0,
+                                        1, 0, penta_placement.flip_horizontal, draw_alpha, false,
+                                        255, 255, 255);
+            }
+        }
+    }
 
     if (sim::should_draw_weapon(combat.current_weapon, anim)) {
         if (const char* weapon_texture =
@@ -647,6 +869,88 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
     SDL_RenderFillRect(renderer_, &rect);
     SDL_SetRenderDrawColor(renderer_, 255, 255, 255, 255);
     SDL_RenderDrawRect(renderer_, &rect);
+}
+
+void MapViewer::draw_player_corpses(int viewport_w, int viewport_h) {
+    if (free_camera_) {
+        return;
+    }
+
+    const float alpha = fixed_timestep_.render_alpha();
+    const auto team_color = sim::default_player_team_color();
+
+    for (const auto& corpse : world_.player_corpses().corpses()) {
+        if (!corpse.active) {
+            continue;
+        }
+
+        const float hitbox_x = corpse.prev_x + (corpse.x - corpse.prev_x) * alpha;
+        const float hitbox_y = corpse.prev_y + (corpse.y - corpse.prev_y) * alpha;
+        const auto draw = sim::player_corpse_draw(corpse.mess);
+        const auto sprite_set = sim::player_sprite_set(draw.anim);
+        const auto placement =
+            sim::player_sprite_placement(hitbox_x, hitbox_y, corpse.facing_left);
+
+        const bool drew_body = draw_player_layer(
+            renderer_, textures_.get(), camera_, viewport_w, viewport_h,
+            sprite_set.body.texture_id, placement.x, placement.y, sprite_set.body.frame_width,
+            sprite_set.body.frame_height, sprite_set.body.frame_count, draw.frame_index,
+            placement.flip_horizontal, 255, false, 255, 255, 255);
+
+        if (drew_body && sprite_set.mask_texture_id != nullptr) {
+            (void)draw_player_layer(renderer_, textures_.get(), camera_, viewport_w, viewport_h,
+                                    sprite_set.mask_texture_id, placement.x, placement.y,
+                                    sprite_set.body.frame_width, sprite_set.body.frame_height,
+                                    sprite_set.body.frame_count, draw.frame_index,
+                                    placement.flip_horizontal, 255, true, team_color.r,
+                                    team_color.g, team_color.b);
+        }
+    }
+
+    SDL_Texture* gib_body = textures_->get(sim::player_gib_body_texture_id());
+    SDL_Texture* gib_mask = textures_->get(sim::player_gib_mask_texture_id());
+    if (gib_body == nullptr) {
+        return;
+    }
+
+    for (const auto& gib : world_.player_corpses().gibs()) {
+        if (!gib.active) {
+            continue;
+        }
+
+        const float px = gib.prev_x + (gib.x - gib.prev_x) * alpha;
+        const float py = gib.prev_y + (gib.y - gib.prev_y) * alpha;
+
+        int dst_x = 0;
+        int dst_y = 0;
+        int dst_w = 0;
+        int dst_h = 0;
+        camera_.world_rect_to_screen(px, py, static_cast<float>(sim::kPlayerGibFrameSize),
+                                       static_cast<float>(sim::kPlayerGibFrameSize), viewport_w,
+                                       viewport_h, dst_x, dst_y, dst_w, dst_h);
+        if (dst_w <= 0 || dst_h <= 0) {
+            continue;
+        }
+
+        const SDL_Rect src{gib.src_frame * sim::kPlayerGibFrameSize, 0,
+                           sim::kPlayerGibFrameSize, sim::kPlayerGibFrameSize};
+        const SDL_Rect dst{dst_x, dst_y, dst_w, dst_h};
+
+        SDL_SetTextureAlphaMod(gib_body, 255);
+        SDL_SetTextureBlendMode(gib_body, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureColorMod(gib_body, 255, 255, 255);
+        SDL_RenderCopyEx(renderer_, gib_body, &src, &dst,
+                         static_cast<double>(gib.rotation_deg), nullptr, SDL_FLIP_NONE);
+
+        if (gib_mask != nullptr) {
+            SDL_SetTextureAlphaMod(gib_mask, 255);
+            SDL_SetTextureBlendMode(gib_mask, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureColorMod(gib_mask, team_color.r, team_color.g, team_color.b);
+            SDL_RenderCopyEx(renderer_, gib_mask, &src, &dst,
+                             static_cast<double>(gib.rotation_deg), nullptr, SDL_FLIP_NONE);
+            SDL_SetTextureColorMod(gib_mask, 255, 255, 255);
+        }
+    }
 }
 
 void MapViewer::draw_projectiles(int viewport_w, int viewport_h) {
@@ -1100,75 +1404,218 @@ void MapViewer::draw_effects(int viewport_w, int viewport_h) {
 }
 
 void MapViewer::draw_hud(int viewport_w, int viewport_h) {
-    (void)viewport_w;
     const auto& player = world_.player();
     const auto& combat = player.combat();
-    const std::string state = player.on_lift()    ? "lift"
-                            : player.on_ground() ? "ground"
-                            : player.in_water()  ? "water"
-                            : player.in_acid()   ? "acid"
-                                                 : "air";
-    const std::string weapon = sim::weapon_display_name(combat.current_weapon);
-    const int ammo = combat.ammo_for_current_weapon();
-    std::string charge;
-    if (combat.bfg_charge_ticks >= 0) {
-        charge = "  [BFG charge " + std::to_string(combat.bfg_charge_ticks) + "]";
+    const auto metrics = render::hud_metrics(viewport_w, viewport_h);
+    using HL = render::HudLayout;
+
+    auto draw_texture_rect = [&](const char* texture_id, int x, int y, int dst_w, int dst_h) {
+        if (texture_id == nullptr || dst_w <= 0 || dst_h <= 0) {
+            return;
+        }
+        SDL_Texture* texture = textures_->get(texture_id);
+        if (texture == nullptr) {
+            return;
+        }
+        int tex_w = 0;
+        int tex_h = 0;
+        SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+        if (tex_w <= 0 || tex_h <= 0) {
+            return;
+        }
+        SDL_SetTextureAlphaMod(texture, 255);
+        SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureColorMod(texture, 255, 255, 255);
+        const SDL_Rect src{0, 0, tex_w, tex_h};
+        const SDL_Rect dst{x, y, dst_w, dst_h};
+        SDL_RenderCopy(renderer_, texture, &src, &dst);
+    };
+
+    auto draw_screen_icon = [&](const char* texture_id, int legacy_x, int legacy_y) {
+        if (texture_id == nullptr) {
+            return;
+        }
+        SDL_Texture* texture = textures_->get(texture_id);
+        if (texture == nullptr) {
+            return;
+        }
+        int tex_w = 0;
+        int tex_h = 0;
+        SDL_QueryTexture(texture, nullptr, nullptr, &tex_w, &tex_h);
+        if (tex_w <= 0 || tex_h <= 0) {
+            return;
+        }
+        draw_texture_rect(texture_id, metrics.sx(legacy_x), metrics.sy(legacy_y),
+                          metrics.sw(tex_w), tex_h);
+    };
+
+    auto draw_bar_fill = [&](int legacy_x, int legacy_y, int legacy_width, std::uint8_t r,
+                             std::uint8_t g, std::uint8_t b) {
+        const int width = metrics.sw(legacy_width);
+        if (width <= 0) {
+            return;
+        }
+        SDL_SetRenderDrawColor(renderer_, r, g, b, 255);
+        const SDL_Rect rect{metrics.sx(legacy_x), metrics.sy(legacy_y), width, 4};
+        SDL_RenderFillRect(renderer_, &rect);
+    };
+
+    for (int tile_y = 0; tile_y < metrics.panel_y; tile_y += HL::kTextureSize) {
+        const int tile_h = std::min(HL::kTextureSize, metrics.panel_y - tile_y);
+        draw_texture_rect("tex.ui.hudbg", metrics.strip_x, tile_y, metrics.strip_width, tile_h);
     }
-    std::string keys;
+
+    draw_texture_rect("tex.ui.hud", metrics.strip_x + HL::kStripOffsetX, metrics.panel_y,
+                      metrics.sw(HL::kTextureSize - HL::kStripOffsetX), metrics.panel_height);
+    draw_screen_icon(player.has_berserk() ? "tex.ui.bmed" : "tex.ui.med2", HL::kHealthIconX,
+                     HL::kHealthIconY);
+    draw_screen_icon("tex.ui.armorhud", HL::kArmorIconX, HL::kArmorIconY);
+
+    const int health_value = std::max(0, player.health());
+    text_.draw_right(renderer_, std::to_string(health_value), metrics.sx(HL::kHealthTextX),
+                     metrics.sy(HL::kHealthTextY), 255, 0, 0);
+    text_.draw_right(renderer_, std::to_string(player.armor()), metrics.sx(HL::kHealthTextX),
+                     metrics.sy(HL::kArmorTextY), 255, 0, 0);
+
+    const auto weapon = combat.current_weapon;
+    if (const char* weapon_icon = render::weapon_hud_icon(weapon)) {
+        draw_screen_icon(weapon_icon, HL::kWeaponIconX, HL::kWeaponIconY);
+    }
+
+    if (render::weapon_hud_uses_ammo_text(weapon)) {
+        std::string ammo_text = std::to_string(combat.ammo_for_current_weapon());
+        if (combat.bfg_charge_ticks >= 0 && weapon == sim::WeaponId::Bfg) {
+            ammo_text = std::to_string(combat.bfg_charge_ticks);
+        }
+        text_.draw_right(renderer_, ammo_text, metrics.sx(HL::kHealthTextX),
+                         metrics.sy(HL::kAmmoTextY), 255, 0, 0);
+    } else {
+        text_.draw_right(renderer_, "--", metrics.sx(HL::kHealthTextX), metrics.sy(HL::kAmmoTextY),
+                         255, 0, 0);
+    }
+
     if (player.has_key_red()) {
-        keys += "R";
+        draw_screen_icon("tex.ui.keyr", HL::kKeyRedX, HL::kKeyY);
     }
     if (player.has_key_green()) {
-        keys += "G";
+        draw_screen_icon("tex.ui.keyg", HL::kKeyGreenX, HL::kKeyY);
     }
     if (player.has_key_blue()) {
-        keys += "B";
+        draw_screen_icon("tex.ui.keyb", HL::kKeyBlueX, HL::kKeyY);
     }
-  const std::string key_line = keys.empty() ? "" : "  Keys " + keys;
-    std::string powerups;
-    if (player.has_invul()) {
-        powerups += " INV";
+
+    const int air = std::max(0, player.air());
+    const int air_fill = (air * HL::kBarFillMaxWidth) / sim::PlayerState::kAirMax;
+    if (player.jet_fuel() > 0) {
+        draw_texture_rect("tex.ui.airbar", metrics.sx(HL::kAirBarX), metrics.sy(HL::kAirBarWithJetY),
+                          metrics.sw(HL::kTextureSize), 16);
+        draw_texture_rect("tex.ui.jetbar", metrics.sx(HL::kJetBarX), metrics.sy(HL::kJetBarY),
+                          metrics.sw(HL::kTextureSize), 16);
+        draw_bar_fill(HL::kBarFillX, HL::kAirFillWithJetY, air_fill, 0, 0, 196);
+        const int jet_fill =
+            (player.jet_fuel() * HL::kBarFillMaxWidth) / sim::PlayerState::kJetFuelMax;
+        draw_bar_fill(HL::kBarFillX, HL::kJetFillY, jet_fill, 208, 0, 0);
+    } else {
+        draw_texture_rect("tex.ui.airbar", metrics.sx(HL::kAirBarX), metrics.sy(HL::kAirBarY),
+                          metrics.sw(HL::kTextureSize), 16);
+        draw_bar_fill(HL::kBarFillX, HL::kAirFillY, air_fill, 0, 0, 196);
     }
-    if (player.has_invis()) {
-        powerups += " INVIS";
+
+    const std::string footer = map_.name + "  [" + std::to_string(map_index_ + 1) + "/" +
+                               std::to_string(map_list_.size()) + "]  ESC pause  Q/E weapons";
+    text_.draw(renderer_, footer, 8, viewport_h - 20, 180, 180, 190);
+}
+
+void MapViewer::draw_pause_menu(int viewport_w, int viewport_h) {
+    SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 170);
+    const SDL_Rect overlay{0, 0, viewport_w, viewport_h};
+    SDL_RenderFillRect(renderer_, &overlay);
+
+    static constexpr const char* kItems[] = {
+        "Resume",
+        "Previous map",
+        "Next map",
+        "Quit game",
+    };
+    static constexpr int kItemCount = 4;
+
+    const int line_height = 22;
+    const int panel_height = 28 + kItemCount * line_height;
+    const int panel_y = (viewport_h - panel_height) / 2;
+
+    text_.draw(renderer_, "PAUSED", viewport_w / 2 - text_.measure_width("PAUSED") / 2,
+               panel_y, 255, 64, 64);
+
+    for (int i = 0; i < kItemCount; ++i) {
+        const bool selected = i == pause_selection_;
+        const std::string label =
+            std::string(selected ? "> " : "  ") + std::to_string(i + 1) + ". " + kItems[i];
+        const int y = panel_y + 28 + i * line_height;
+        if (selected) {
+            text_.draw(renderer_, label, viewport_w / 2 - text_.measure_width(label) / 2, y, 255,
+                       220, 120);
+        } else {
+            text_.draw(renderer_, label, viewport_w / 2 - text_.measure_width(label) / 2, y, 200,
+                       200, 210);
+        }
     }
-    if (player.has_suit()) {
-        powerups += " SUIT";
+
+    const char* hint = "Up/Down  Enter  Esc";
+    text_.draw(renderer_, hint, viewport_w / 2 - text_.measure_width(hint) / 2,
+               panel_y + panel_height + 8, 150, 150, 160);
+}
+
+void MapViewer::draw_player_overlays(int viewport_w, int viewport_h) {
+    if (free_camera_) {
+        return;
     }
-    if (player.jetpack_active() || player.jet_fuel() > 0) {
-        powerups += " JET " + std::to_string(player.jet_fuel());
-    }
-    const std::string hud = map_.name + "  (" + std::to_string(map_index_ + 1) + "/" +
-                            std::to_string(map_list_.size()) + ")  HP " +
-                            std::to_string(player.health()) + "/" +
-                            std::to_string(sim::PlayerState::kMaxHealth) + "  AP " +
-                            std::to_string(player.armor()) + "/" +
-                            std::to_string(sim::PlayerState::kArmorLimit) + key_line + powerups +
-                            "  |  " +
-                            weapon + " " + std::to_string(ammo) + charge +
-                            "  |  1-9 weapons  0/B=BFG  -/G=SuperCG  Q prev  wheel zoom  " +
-                            state;
-    text_.draw(renderer_, hud, 8, viewport_h - 24);
+
+    const int game_w = render::game_viewport_width(viewport_w);
+    const auto& player = world_.player();
+
+    auto draw_tint = [&](const sim::PlayerOverlayTint& tint) {
+        if (!tint.active || tint.a == 0) {
+            return;
+        }
+        SDL_SetRenderDrawBlendMode(renderer_, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer_, tint.r, tint.g, tint.b, tint.a);
+        const SDL_Rect rect{0, 0, game_w, viewport_h};
+        SDL_RenderFillRect(renderer_, &rect);
+    };
+
+    draw_tint(sim::player_invul_overlay(player));
+    draw_tint(sim::player_suit_overlay(player));
+    draw_tint(sim::player_berserk_overlay(player));
+    draw_tint(sim::player_pain_overlay(player));
 }
 
 void MapViewer::render(int viewport_w, int viewport_h) {
     update_camera_follow(fixed_timestep_.render_alpha());
 
+    const int game_w = render::game_viewport_width(viewport_w);
+
     SDL_SetRenderDrawColor(renderer_, 20, 15, 26, 255);
     SDL_RenderClear(renderer_);
 
-    draw_sky(viewport_w, viewport_h);
-    map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, viewport_w, viewport_h);
-    draw_items(viewport_w, viewport_h, false);
-    draw_player(viewport_w, viewport_h);
-    draw_targets(viewport_w, viewport_h);
-    draw_items(viewport_w, viewport_h, true);
-    draw_projectiles(viewport_w, viewport_h);
-    draw_effects(viewport_w, viewport_h);
+    draw_sky(game_w, viewport_h);
+    map_renderer_.draw(renderer_, triggers_.map_view(map_), *textures_, camera_, game_w,
+                       viewport_h);
+    draw_items(game_w, viewport_h, false);
+    draw_player(game_w, viewport_h);
+    draw_player_corpses(game_w, viewport_h);
+    draw_targets(game_w, viewport_h);
+    draw_items(game_w, viewport_h, true);
+    draw_projectiles(game_w, viewport_h);
+    draw_effects(game_w, viewport_h);
 #if D2DF_DEBUG_UI
-    draw_debug_overlays(viewport_w, viewport_h);
+    draw_debug_overlays(game_w, viewport_h);
 #endif
+    draw_player_overlays(viewport_w, viewport_h);
     draw_hud(viewport_w, viewport_h);
+    if (paused_) {
+        draw_pause_menu(viewport_w, viewport_h);
+    }
 }
 
 #if D2DF_DEBUG_UI

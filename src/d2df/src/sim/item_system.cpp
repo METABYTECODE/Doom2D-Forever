@@ -252,12 +252,23 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
                 combat.max_ammo[static_cast<std::size_t>(AmmoType::Fuel)]);
         return true;
 
-    case map::ItemType::AmmoBackpack:
-        combat.max_ammo[static_cast<std::size_t>(AmmoType::Bullets)] = 200;
-        combat.max_ammo[static_cast<std::size_t>(AmmoType::Shells)] = 50;
-        combat.max_ammo[static_cast<std::size_t>(AmmoType::Rockets)] = 50;
-        combat.max_ammo[static_cast<std::size_t>(AmmoType::Cells)] = 300;
-        combat.max_ammo[static_cast<std::size_t>(AmmoType::Fuel)] = 100;
+    case map::ItemType::AmmoBackpack: {
+        if (player.has_backpack()) {
+            bool all_full = true;
+            for (std::size_t i = 0; i < kAmmoTypeCount; ++i) {
+                if (combat.ammo[i] < combat.max_ammo[i]) {
+                    all_full = false;
+                    break;
+                }
+            }
+            if (all_full) {
+                return false;
+            }
+        }
+
+        for (std::size_t i = 0; i < kAmmoTypeCount; ++i) {
+            combat.max_ammo[i] = kBackpackMaxAmmo[i];
+        }
         inc_max(combat.ammo[static_cast<std::size_t>(AmmoType::Bullets)], 10,
                 combat.max_ammo[static_cast<std::size_t>(AmmoType::Bullets)]);
         inc_max(combat.ammo[static_cast<std::size_t>(AmmoType::Shells)], 4,
@@ -266,9 +277,11 @@ bool apply_item_effect(map::ItemType type, PlayerState& player) {
                 combat.max_ammo[static_cast<std::size_t>(AmmoType::Rockets)]);
         inc_max(combat.ammo[static_cast<std::size_t>(AmmoType::Cells)], 40,
                 combat.max_ammo[static_cast<std::size_t>(AmmoType::Cells)]);
-        inc_max(combat.ammo[static_cast<std::size_t>(AmmoType::Fuel)], 100,
+        inc_max(combat.ammo[static_cast<std::size_t>(AmmoType::Fuel)], 50,
                 combat.max_ammo[static_cast<std::size_t>(AmmoType::Fuel)]);
+        player.give_backpack();
         return true;
+    }
 
     default:
         return false;
@@ -408,6 +421,62 @@ void ItemSystem::spawn_monster_drop(map::ItemType type, float center_x, float ce
     item.vel_y = vel_y;
     item.active = true;
     items_.push_back(item);
+}
+
+void ItemSystem::spawn_player_death_loot(const PlayerState& player) {
+    const float center_x = player.x + player.width * 0.5f;
+    const float center_y = player.y + player.height * 0.5f;
+    const int base_vel_x = player.vel_x / 2;
+    const int base_vel_y = player.vel_y / 2;
+
+    auto drop = [&](map::ItemType type, int scatter) {
+        if (type == map::ItemType::None) {
+            return;
+        }
+        const int vel_x = base_vel_x - 3 + (scatter % 7);
+        const int vel_y = base_vel_y - (scatter % 4);
+        spawn_monster_drop(type, center_x, center_y, vel_x, vel_y);
+    };
+
+    struct WeaponDrop {
+        WeaponId weapon = WeaponId::Knuckles;
+        map::ItemType item = map::ItemType::None;
+    };
+
+    static constexpr WeaponDrop kWeaponDrops[] = {
+        {WeaponId::Saw, map::ItemType::WeaponSaw},
+        {WeaponId::Shotgun1, map::ItemType::WeaponShotgun1},
+        {WeaponId::Shotgun2, map::ItemType::WeaponShotgun2},
+        {WeaponId::Chaingun, map::ItemType::WeaponChaingun},
+        {WeaponId::RocketLauncher, map::ItemType::WeaponRocketLauncher},
+        {WeaponId::Plasma, map::ItemType::WeaponPlasma},
+        {WeaponId::Bfg, map::ItemType::WeaponBfg},
+        {WeaponId::SuperChaingun, map::ItemType::WeaponSuperChaingun},
+        {WeaponId::Flamethrower, map::ItemType::WeaponFlamethrower},
+    };
+
+    const auto& combat = player.combat();
+    for (const auto& entry : kWeaponDrops) {
+        if (combat.owned[static_cast<std::size_t>(entry.weapon)]) {
+            drop(entry.item, static_cast<int>(entry.weapon));
+        }
+    }
+
+    if (player.jet_fuel() > 0) {
+        drop(map::ItemType::Jetpack, 35);
+    }
+    if (player.has_key_red()) {
+        drop(map::ItemType::KeyRed, 41);
+    }
+    if (player.has_key_green()) {
+        drop(map::ItemType::KeyGreen, 42);
+    }
+    if (player.has_key_blue()) {
+        drop(map::ItemType::KeyBlue, 43);
+    }
+    if (player.has_backpack()) {
+        drop(map::ItemType::AmmoBackpack, 44);
+    }
 }
 
 void ItemSystem::reset(const map::MapDocument& map, const GameRules& rules) {

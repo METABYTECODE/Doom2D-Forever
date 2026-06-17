@@ -8,6 +8,9 @@ namespace d2df::sim {
 constexpr std::size_t kWeaponSlotCount = 11;
 constexpr std::size_t kAmmoTypeCount = 5;
 
+constexpr int kDefaultMaxAmmo[kAmmoTypeCount] = {200, 50, 50, 300, 100};
+constexpr int kBackpackMaxAmmo[kAmmoTypeCount] = {400, 100, 100, 600, 200};
+
 enum class WeaponId : std::uint8_t {
     Knuckles = 0,
     Saw = 1,

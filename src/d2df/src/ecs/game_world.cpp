@@ -47,6 +47,8 @@ void GameWorld::reset_player(const map::MapDocument& map) {
     targets_.clear();
     projectiles_.clear();
     items_.reset(map);
+    player_corpses_.clear();
+    death_loot_handled_ = false;
     spawn_map_monsters(map);
 
     sync_to_ecs();
@@ -82,14 +84,43 @@ void GameWorld::respawn_player() {
         player_.restore_health();
     }
     projectiles_.clear();
+    death_loot_handled_ = false;
     sync_to_ecs();
+}
+
+void GameWorld::handle_player_death_loot() {
+    if (death_loot_handled_ || player_.alive()) {
+        return;
+    }
+    items_.spawn_player_death_loot(player_);
+    death_loot_handled_ = true;
+}
+
+void GameWorld::handle_player_death_corpse(int map_height) {
+    if (player_.alive() || player_.corpse_resolved()) {
+        return;
+    }
+
+    if (player_.death_health() < sim::kPlayerDeathGibHealthThreshold) {
+        player_corpses_.spawn_from_death(player_, map_height);
+        player_.mark_corpse_resolved();
+        return;
+    }
+
+    if (player_.death_phase() == sim::PlayerDeathPhase::Die2) {
+        player_corpses_.spawn_from_death(player_, map_height);
+        player_.mark_corpse_resolved();
+    }
 }
 
 void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInput input,
                              EventBus* events, int map_width, int map_height,
                              sim::TriggerSystem* triggers) {
     if (!player_.alive()) {
+        handle_player_death_loot();
         player_.tick_corpse();
+        handle_player_death_corpse(map_height);
+        player_corpses_.tick(collision, map_height);
         sync_to_ecs();
         return;
     }
@@ -116,6 +147,8 @@ void GameWorld::fixed_update(const sim::MapCollision& collision, sim::PlayerInpu
 
     items_.tick(player_, &collision, events);
 
+    handle_player_death_loot();
+    player_corpses_.tick(collision, map_height);
     sync_to_ecs();
 }
 

@@ -25,6 +25,7 @@
 #include <d2df/sim/game_rules.hpp>
 #include <d2df/sim/monster_system.hpp>
 #include <d2df/sim/map_collision.hpp>
+#include <d2df/sim/player_corpse_system.hpp>
 #include <d2df/sim/player_state.hpp>
 #include <d2df/sim/effect_types.hpp>
 #include <d2df/sim/projectile_system.hpp>
@@ -33,6 +34,7 @@
 #include <d2df/sim/weapon_system.hpp>
 #include <d2df/sim/player_types.hpp>
 #include <d2df/sim/weapon_types.hpp>
+#include <d2df/render/hud_layout.hpp>
 
 using namespace d2df;
 
@@ -2348,6 +2350,9 @@ TEST_CASE("weapon and monster sfx asset ids resolve", "[sim][audio]") {
     CHECK(std::string_view(sim::weapon_fire_sfx(sim::WeaponId::Pistol)) == "sfx.world.firepistol");
     CHECK(std::string_view(sim::weapon_fire_sfx(sim::WeaponId::RocketLauncher)) ==
           "sfx.world.firerocket");
+    CHECK(std::string_view(sim::weapon_fire_sfx(sim::WeaponId::Chaingun)) == "sfx.world.firecgun");
+    CHECK(std::string_view(sim::weapon_fire_sfx(sim::WeaponId::SuperChaingun)) ==
+          "sfx.world.fireshotgun");
     CHECK(std::string_view(map::monster_die_sfx(map::MonsterType::Barrel)) ==
           "sfx.monster.barrel_die");
     CHECK(std::string_view(map::item_pickup_sfx(map::ItemType::WeaponChaingun)) ==
@@ -2660,9 +2665,200 @@ TEST_CASE("player pain and death states follow damage", "[sim][player]") {
     CHECK_FALSE(player.alive());
     CHECK(player.death_phase() == sim::PlayerDeathPhase::Die1);
     CHECK(player.pain_ticks() == 0);
+    CHECK(player.respawn_ticks_remaining() == sim::kPlayerRespawnTicks);
+    CHECK_FALSE(player.ready_to_respawn());
 
     for (int i = 0; i < sim::kPlayerDie1Ticks; ++i) {
         player.tick_corpse();
     }
     CHECK(player.death_phase() == sim::PlayerDeathPhase::Die2);
+    CHECK_FALSE(player.ready_to_respawn());
+
+    while (!player.ready_to_respawn()) {
+        player.tick_corpse();
+    }
+    CHECK(player.death_phase() == sim::PlayerDeathPhase::Die2);
+}
+
+TEST_CASE("player punch overlay state tracks knuckles swing", "[sim][player]") {
+    sim::PlayerState player;
+
+    CHECK(player.punch_ticks() == 0);
+
+    player.start_punch(true, false);
+    CHECK(player.punch_ticks() == sim::kPlayerPunchFrames);
+    CHECK(player.punch_aim_up());
+    CHECK_FALSE(player.punch_aim_down());
+    CHECK(std::string_view(sim::player_punch_texture_id(true, false, false)) ==
+          "tex.weapon.punch_up_2");
+    CHECK(sim::player_punch_frame_index(player.punch_ticks()) == 0);
+
+    sim::MapCollision collision;
+    sim::PlayerInput idle{};
+    player.fixed_update(collision, idle);
+    CHECK(player.punch_ticks() == sim::kPlayerPunchFrames - 1);
+    CHECK(sim::player_punch_frame_index(player.punch_ticks()) == 1);
+}
+
+TEST_CASE("player model pain and death sfx tiers", "[sim][player]") {
+    CHECK(std::string_view(sim::player_model_pain_sfx(10, 0)) == "sfx.model.pain1");
+    CHECK(std::string_view(sim::player_model_pain_sfx(30, 0)) == "sfx.model.pain2");
+    CHECK(std::string_view(sim::player_model_pain_sfx(30, 1)) == "sfx.model.pain3");
+    CHECK(std::string_view(sim::player_model_pain_sfx(80, 0)) == "sfx.model.pain5");
+    CHECK(std::string_view(sim::player_model_pain_sfx(200, 0)) == "sfx.model.megapain");
+    CHECK(std::string_view(sim::player_model_death_sfx()) == "sfx.model.die1_2");
+    CHECK(sim::player_model_pain_sfx(0, 0) == nullptr);
+}
+
+TEST_CASE("texture hud layout and weapon icons resolve", "[render][hud]") {
+    CHECK(render::HudLayout::kStripWidth == 196);
+    CHECK(render::HudLayout::kPanelHeight == 256);
+    const auto metrics = render::hud_metrics(1280, 720);
+    CHECK(metrics.strip_x == 1280 - 196);
+    CHECK(metrics.panel_y == 720 - 256);
+    CHECK(render::game_viewport_width(1280) == 1280 - 196);
+    CHECK(std::string_view(render::weapon_hud_icon(sim::WeaponId::Pistol)) == "tex.ui.pistol");
+    CHECK(std::string_view(render::weapon_hud_icon(sim::WeaponId::Knuckles)) == "tex.ui.knuckles");
+    CHECK_FALSE(render::weapon_hud_uses_ammo_text(sim::WeaponId::Knuckles));
+    CHECK(render::weapon_hud_uses_ammo_text(sim::WeaponId::Pistol));
+
+    const auto placement =
+        sim::player_invul_penta_placement(100.0f, 200.0f, false, 64, 64);
+    CHECK(placement.x == 100.0f + 17.0f - 32.0f - 2.0f);
+    CHECK(placement.y == 200.0f + 19.0f - 32.0f);
+}
+
+TEST_CASE("player death drops owned weapons and keys", "[sim][items]") {
+    sim::ItemSystem items;
+    map::MapDocument doc;
+    items.reset(doc);
+
+    sim::PlayerState player;
+    own_weapon(player.combat(), sim::WeaponId::Chaingun);
+    own_weapon(player.combat(), sim::WeaponId::RocketLauncher);
+    player.give_key_red();
+    player.give_key_blue();
+
+    const std::size_t before = items.items().size();
+    items.spawn_player_death_loot(player);
+
+    CHECK(items.items().size() == before + 4);
+    bool saw_chaingun = false;
+    bool saw_rocket = false;
+    bool saw_red = false;
+    bool saw_blue = false;
+    for (const auto& item : items.items()) {
+        if (item.type == map::ItemType::WeaponChaingun) {
+            saw_chaingun = true;
+        }
+        if (item.type == map::ItemType::WeaponRocketLauncher) {
+            saw_rocket = true;
+        }
+        if (item.type == map::ItemType::KeyRed) {
+            saw_red = true;
+        }
+        if (item.type == map::ItemType::KeyBlue) {
+            saw_blue = true;
+        }
+        if (item.dropped) {
+            CHECK(item.fall);
+            CHECK_FALSE(item.respawnable);
+        }
+    }
+    CHECK(saw_chaingun);
+    CHECK(saw_rocket);
+    CHECK(saw_red);
+    CHECK(saw_blue);
+}
+
+TEST_CASE("backpack pickup raises ammo caps and drops on death", "[sim][items]") {
+    map::MapDocument doc;
+    map::MapItem backpack;
+    backpack.position = {100, 100};
+    backpack.type = map::ItemType::AmmoBackpack;
+    doc.items.push_back(backpack);
+
+    sim::ItemSystem items;
+    items.reset(doc);
+
+    sim::PlayerState player;
+    player.snap_to(100.0f, 100.0f);
+    sim::PlayerCombat& combat = player.combat();
+    CHECK(combat.max_ammo[static_cast<std::size_t>(sim::AmmoType::Bullets)] == 200);
+
+    items.tick(player, nullptr, nullptr);
+
+    CHECK(player.has_backpack());
+    CHECK(combat.max_ammo[static_cast<std::size_t>(sim::AmmoType::Bullets)] == 400);
+    CHECK(combat.max_ammo[static_cast<std::size_t>(sim::AmmoType::Cells)] == 600);
+    CHECK_FALSE(items.items()[0].active);
+
+    const std::size_t before = items.items().size();
+    items.spawn_player_death_loot(player);
+    CHECK(items.items().size() == before + 1);
+    CHECK(items.items().back().type == map::ItemType::AmmoBackpack);
+}
+
+TEST_CASE("player powerup flicker and overlay tints", "[sim][player]") {
+    CHECK(sim::powerup_flicker_visible(100));
+    CHECK(sim::powerup_flicker_visible(76));
+    CHECK_FALSE(sim::powerup_flicker_visible(0));
+
+    sim::PlayerState player;
+    player.give_invis();
+    CHECK(sim::player_draw_alpha(player) == 200);
+
+    player.give_invul();
+    CHECK(sim::player_invul_penta_visible(player));
+    CHECK(sim::player_invul_overlay(player).active);
+
+    player.give_suit();
+    CHECK(sim::player_suit_overlay(player).active);
+
+    player.give_berserk();
+    CHECK(sim::player_berserk_overlay(player).active);
+
+    sim::PlayerState hurt_player;
+    hurt_player.apply_damage(10);
+    CHECK(sim::player_pain_overlay(hurt_player).active);
+    CHECK(sim::player_pain_overlay(hurt_player).a > 0);
+}
+
+TEST_CASE("player death corpse and gib spawning", "[sim][player]") {
+    sim::PlayerState player;
+    player.snap_to(100.0f, 200.0f);
+    player.combat().facing_left = true;
+
+    CHECK(player.apply_damage(120));
+    CHECK(player.death_health() == -20);
+    CHECK_FALSE(player.corpse_resolved());
+
+    for (int i = 0; i < sim::kPlayerDie1Ticks; ++i) {
+        player.tick_corpse();
+    }
+    CHECK(player.death_phase() == sim::PlayerDeathPhase::Die2);
+
+    sim::PlayerCorpseSystem corpses;
+    corpses.spawn_from_death(player, 1000);
+    CHECK(corpses.corpses().size() == 1);
+    CHECK_FALSE(corpses.corpses().front().mess);
+    CHECK(corpses.gibs().empty());
+
+    sim::PlayerState gibbed;
+    gibbed.snap_to(120.0f, 220.0f);
+    CHECK(gibbed.apply_damage(200));
+    CHECK(gibbed.death_health() == -100);
+
+    sim::PlayerCorpseSystem gib_corpses;
+    gib_corpses.spawn_from_death(gibbed, 1000);
+    CHECK(gib_corpses.corpses().empty());
+    CHECK(gib_corpses.gibs().size() == sim::kPlayerGibCount);
+
+    const auto draw = sim::player_corpse_draw(true);
+    CHECK(draw.anim == sim::PlayerAnim::Die2);
+    CHECK(draw.frame_index == sim::kPlayerDie2Frames - 1);
+
+    CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 0, 0) == 0);
+    CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 15, 0) == 5);
+    CHECK(sim::player_anim_frame_index(sim::PlayerAnim::Die1, 99, 0) == sim::kPlayerDie1Frames - 1);
 }

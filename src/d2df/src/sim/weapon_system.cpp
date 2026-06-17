@@ -58,15 +58,15 @@ void WeaponSystem::compute_ray_end(float wx, float wy, float xd, float yd, int m
 }
 
 void WeaponSystem::publish_player_fired(EventBus* events, EntityId shooter_id, WeaponId weapon,
-                                        float ox, float oy, float ax, float ay) {
+                                        float ox, float oy, float ax, float ay, bool melee_hit) {
     if (events == nullptr) {
         return;
     }
     events->publish(events::PlayerFired{shooter_id, static_cast<std::uint8_t>(weapon), ox, oy, ax,
-                                        ay});
+                                        ay, melee_hit});
 }
 
-void WeaponSystem::fire_melee(PlayerState& player, std::vector<ShootableTarget>& targets,
+bool WeaponSystem::fire_melee(PlayerState& player, std::vector<ShootableTarget>& targets,
                               EntityId shooter_id, EventBus* events, float box_width,
                               float box_height, int damage, events::DamageSource source) {
     for (auto& target : targets) {
@@ -81,8 +81,9 @@ void WeaponSystem::fire_melee(PlayerState& player, std::vector<ShootableTarget>&
         target.apply_damage(damage, shooter_id);
         publish_entity_damage(events, target.id, shooter_id, health_before - target.health, source,
                               target.health);
-        return;
+        return true;
     }
+    return false;
 }
 
 void WeaponSystem::try_fire(PlayerState& player, const MapCollision& collision,
@@ -116,21 +117,24 @@ void WeaponSystem::try_fire(PlayerState& player, const MapCollision& collision,
     compute_ray_end(wx, wy, xd, yd, map_width, ray_x2, ray_y2);
 
     switch (weapon) {
-    case WeaponId::Knuckles:
-        publish_player_fired(events, shooter_id, WeaponId::Knuckles, wx, wy, xd, yd);
-        fire_melee(player, targets, shooter_id, events, 39.0f, 52.0f, 3,
-                   events::DamageSource::Melee);
+    case WeaponId::Knuckles: {
+        player.start_punch(input.aim_up, input.aim_down);
+        const bool hit = fire_melee(player, targets, shooter_id, events, 39.0f, 52.0f, 3,
+                                    events::DamageSource::Melee);
+        publish_player_fired(events, shooter_id, WeaponId::Knuckles, wx, wy, xd, yd, hit);
         combat.reloading[static_cast<std::size_t>(WeaponId::Knuckles)] =
             weapon_reload_ticks(WeaponId::Knuckles);
         break;
+    }
 
-    case WeaponId::Saw:
-        publish_player_fired(events, shooter_id, WeaponId::Saw, wx, wy, xd, yd);
-        fire_melee(player, targets, shooter_id, events, 32.0f, 52.0f, 3,
-                   events::DamageSource::Melee);
+    case WeaponId::Saw: {
+        const bool hit = fire_melee(player, targets, shooter_id, events, 32.0f, 52.0f, 3,
+                                    events::DamageSource::Melee);
+        publish_player_fired(events, shooter_id, WeaponId::Saw, wx, wy, xd, yd, hit);
         combat.reloading[static_cast<std::size_t>(WeaponId::Saw)] =
             weapon_reload_ticks(WeaponId::Saw);
         break;
+    }
 
     case WeaponId::Pistol: {
         if (projectiles == nullptr) {

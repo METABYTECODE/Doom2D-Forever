@@ -2,6 +2,7 @@
 
 #include <SDL_scancode.h>
 
+#include <d2df/audio/player_continuous_sfx.hpp>
 #include <d2df/audio/sound_system.hpp>
 #include <d2df/core/event_bus.hpp>
 #include <d2df/core/fixed_timestep.hpp>
@@ -57,6 +58,10 @@ public:
     void update(float frame_dt);
     void render(int viewport_w, int viewport_h);
 
+    void toggle_pause();
+    [[nodiscard]] bool is_paused() const { return paused_; }
+    [[nodiscard]] bool consume_quit_request();
+
 #if D2DF_DEBUG_UI
     void set_debug_ui(debug::DebugUi* debug_ui) { debug_ui_ = debug_ui; }
     void draw_debug_overlays(int viewport_w, int viewport_h);
@@ -71,6 +76,7 @@ private:
     void fixed_update();
     void draw_sky(int viewport_w, int viewport_h);
     void draw_player(int viewport_w, int viewport_h);
+    void draw_player_corpses(int viewport_w, int viewport_h);
     void draw_targets(int viewport_w, int viewport_h);
     void draw_items(int viewport_w, int viewport_h, bool monster_drops_only = false);
     void draw_projectiles(int viewport_w, int viewport_h);
@@ -80,7 +86,12 @@ private:
     void spawn_smoke_effect(const events::WorldSmokePuff& event);
     void spawn_bubble_effect(const events::WorldBubblePuff& event);
     void draw_hud(int viewport_w, int viewport_h);
+    void draw_player_overlays(int viewport_w, int viewport_h);
+    void draw_pause_menu(int viewport_w, int viewport_h);
     void update_camera_follow(float render_alpha = 1.0f);
+    void clear_input_state();
+    void handle_pause_key_down(int sym, SDL_Scancode scancode);
+    void activate_pause_selection();
 
     SDL_Renderer* renderer_;
     std::filesystem::path content_root_;
@@ -107,9 +118,13 @@ private:
     bool key_aim_down_ = false;
     bool key_weapon_prev_ = false;
     int weapon_select_request_ = -1;
+    bool paused_ = false;
+    int pause_selection_ = 0;
+    bool quit_requested_ = false;
     float camera_move_speed_ = 480.0f;
     EventBus* events_ = nullptr;
     audio::SoundSystem sound_;
+    audio::PlayerContinuousSfx continuous_sfx_;
     std::vector<WorldEffect> effects_;
 #if D2DF_DEBUG_UI
     debug::DebugUi* debug_ui_ = nullptr;

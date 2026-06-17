@@ -80,10 +80,21 @@ struct PlayerState {
     [[nodiscard]] bool has_key_red() const { return key_red_; }
     [[nodiscard]] bool has_key_green() const { return key_green_; }
     [[nodiscard]] bool has_key_blue() const { return key_blue_; }
+    [[nodiscard]] bool has_backpack() const { return has_backpack_; }
     [[nodiscard]] std::uint8_t key_mask() const;
     [[nodiscard]] int tick() const { return tick_; }
     [[nodiscard]] int pain_ticks() const { return pain_ticks_; }
+    [[nodiscard]] int punch_ticks() const { return punch_ticks_; }
+    [[nodiscard]] bool punch_aim_up() const { return punch_aim_up_; }
+    [[nodiscard]] bool punch_aim_down() const { return punch_aim_down_; }
     [[nodiscard]] PlayerDeathPhase death_phase() const { return death_phase_; }
+    [[nodiscard]] int death_health() const { return death_health_; }
+    [[nodiscard]] bool corpse_resolved() const { return corpse_resolved_; }
+    [[nodiscard]] bool ready_to_respawn() const {
+        return !alive() && respawn_ticks_remaining_ <= 0;
+    }
+    [[nodiscard]] int respawn_ticks_remaining() const { return respawn_ticks_remaining_; }
+    [[nodiscard]] int death_started_tick() const { return death_started_tick_; }
     [[nodiscard]] float render_x(float alpha) const;
     [[nodiscard]] float render_y(float alpha) const;
 
@@ -91,7 +102,9 @@ struct PlayerState {
     bool apply_damage(int amount);
 
     void tick_corpse();
+    void mark_corpse_resolved();
     void reset_death_state();
+    void start_punch(bool aim_up, bool aim_down);
 
     void restore_health();
     /// Raise health up to cap; returns false if already at or above cap.
@@ -102,6 +115,7 @@ struct PlayerState {
     bool give_key_red();
     bool give_key_green();
     bool give_key_blue();
+    void give_backpack();
 
     [[nodiscard]] bool has_suit() const;
     [[nodiscard]] bool has_invul() const;
@@ -110,6 +124,10 @@ struct PlayerState {
     [[nodiscard]] int jet_fuel() const { return jet_fuel_; }
     [[nodiscard]] int air() const { return air_; }
     [[nodiscard]] bool jetpack_active() const { return jetpack_active_; }
+    [[nodiscard]] int powerup_suit_ticks_remaining() const;
+    [[nodiscard]] int powerup_invul_ticks_remaining() const;
+    [[nodiscard]] int powerup_invis_ticks_remaining() const;
+    [[nodiscard]] int berserk_ticks_remaining() const;
 
     void give_suit();
     void give_invul();
@@ -135,6 +153,7 @@ private:
     bool key_red_ = false;
     bool key_green_ = false;
     bool key_blue_ = false;
+    bool has_backpack_ = false;
     int powerup_suit_until_ = 0;
     int powerup_invul_until_ = 0;
     int powerup_invis_until_ = 0;
@@ -150,8 +169,14 @@ private:
     /// Legacy MoveButton: -1 = left, 0 = none, 1 = right. Unchanged while both keys held.
     int run_direction_ = 0;
     int pain_ticks_ = 0;
+    int punch_ticks_ = 0;
+    bool punch_aim_up_ = false;
+    bool punch_aim_down_ = false;
     PlayerDeathPhase death_phase_ = PlayerDeathPhase::None;
     int death_started_tick_ = 0;
+    int death_health_ = 0;
+    bool corpse_resolved_ = false;
+    int respawn_ticks_remaining_ = 0;
     PlayerCombat combat_;
 };
 

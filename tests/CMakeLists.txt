@@ -15,6 +15,7 @@ target_link_libraries(d2df_tests
         d2df::core
         d2df::core_impl
         d2df::sim
+        d2df::render
         Catch2::Catch2WithMain
 )
 

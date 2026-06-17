@@ -248,11 +248,17 @@ int GameApp::run() {
 #if D2DF_DEBUG_UI
                 if (debug_ui_ && debug_ui_->menu_visible()) {
                     debug_ui_->toggle_menu();
+                } else if (map_viewer_) {
+                    map_viewer_->toggle_pause();
                 } else {
                     running_ = false;
                 }
 #else
-                running_ = false;
+                if (map_viewer_) {
+                    map_viewer_->toggle_pause();
+                } else {
+                    running_ = false;
+                }
 #endif
             } else if (map_viewer_) {
 #if D2DF_DEBUG_UI
@@ -265,6 +271,9 @@ int GameApp::run() {
 #endif
                 if (event.type == SDL_KEYDOWN) {
                     map_viewer_->handle_key_down(event.key.keysym.sym, event.key.keysym.scancode);
+                    if (map_viewer_->consume_quit_request()) {
+                        running_ = false;
+                    }
                 } else if (event.type == SDL_KEYUP) {
                     map_viewer_->handle_key_up(event.key.keysym.sym);
                 } else if (event.type == SDL_MOUSEWHEEL) {

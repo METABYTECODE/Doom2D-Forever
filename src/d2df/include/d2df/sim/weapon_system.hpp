@@ -34,12 +34,12 @@ private:
     void compute_ray_end(float wx, float wy, float xd, float yd, int map_width, float& ray_x2,
                          float& ray_y2) const;
 
-    void fire_melee(PlayerState& player, std::vector<ShootableTarget>& targets, EntityId shooter_id,
-                    EventBus* events, float box_width, float box_height, int damage,
-                    events::DamageSource source);
+    [[nodiscard]] bool fire_melee(PlayerState& player, std::vector<ShootableTarget>& targets,
+                                  EntityId shooter_id, EventBus* events, float box_width,
+                                  float box_height, int damage, events::DamageSource source);
 
     void publish_player_fired(EventBus* events, EntityId shooter_id, WeaponId weapon, float ox,
-                              float oy, float ax, float ay);
+                              float oy, float ax, float ay, bool melee_hit = true);
 
     void tick_bfg_charge(PlayerState& player, ProjectileSystem* projectiles, EntityId shooter_id,
                          EventBus* events);

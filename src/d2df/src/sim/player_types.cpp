@@ -172,9 +172,11 @@ PlayerSpriteSet player_sprite_set(PlayerAnim anim) {
     case PlayerAnim::Pain:
         return make_set("tex.tile.pain", "tex.tile.painmask");
     case PlayerAnim::Die1:
-        return make_set("tex.tile.die1", "tex.tile.die1mask", 6, 3);
+        return make_set("tex.tile.die1", "tex.tile.die1mask", kPlayerDie1Frames,
+                        kPlayerDie1FramePeriod);
     case PlayerAnim::Die2:
-        return make_set("tex.tile.die2", "tex.tile.die2mask");
+        return make_set("tex.tile.die2", "tex.tile.die2mask", kPlayerDie2Frames,
+                        kPlayerDie2FramePeriod);
     default:
         return make_set("tex.tile.stand", "tex.tile.standmask");
     }
@@ -313,11 +315,152 @@ int player_anim_frame_index(PlayerAnim anim, int tick, int vel_x) {
     if (set.body.frame_count <= 1 || set.body.anim_period <= 0) {
         return 0;
     }
-    return (tick / set.body.anim_period) % set.body.frame_count;
+
+    const int frame = tick / set.body.anim_period;
+    if (anim == PlayerAnim::Die1 || anim == PlayerAnim::Die2) {
+        return std::min(frame, set.body.frame_count - 1);
+    }
+    return frame % set.body.frame_count;
 }
 
 PlayerTeamColor default_player_team_color() {
     return {};
+}
+
+const char* player_punch_texture_id(bool aim_up, bool aim_down, bool berserk) {
+    if (berserk) {
+        if (aim_up) {
+            return "tex.weapon.punchb_up_2";
+        }
+        if (aim_down) {
+            return "tex.weapon.punchb_dn_2";
+        }
+        return "tex.weapon.punchb_2";
+    }
+
+    if (aim_up) {
+        return "tex.weapon.punch_up_2";
+    }
+    if (aim_down) {
+        return "tex.weapon.punch_dn_2";
+    }
+    return "tex.weapon.punch_2";
+}
+
+PlayerSpritePlacement player_punch_placement(float hitbox_x, float hitbox_y, bool facing_left) {
+    auto placement = player_sprite_placement(hitbox_x, hitbox_y, facing_left);
+    placement.y += kPlayerSpriteOffsetY - kPlayerPunchOffsetY;
+    return placement;
+}
+
+int player_punch_frame_index(int punch_ticks) {
+    if (punch_ticks <= 0) {
+        return 0;
+    }
+    return std::clamp(kPlayerPunchFrames - punch_ticks, 0, kPlayerPunchFrames - 1);
+}
+
+const char* player_model_pain_sfx(int damage_amount, int tick) {
+    if (damage_amount <= 0) {
+        return nullptr;
+    }
+
+    if (damage_amount <= 20) {
+        return "sfx.model.pain1";
+    }
+    if (damage_amount <= 55) {
+        return (tick & 1) == 0 ? "sfx.model.pain2" : "sfx.model.pain3";
+    }
+    if (damage_amount <= 120) {
+        return (tick & 1) == 0 ? "sfx.model.pain5" : "sfx.model.pain6";
+    }
+    return "sfx.model.megapain";
+}
+
+const char* player_model_death_sfx() {
+    return "sfx.model.die1_2";
+}
+
+PlayerSpritePlacement player_invul_penta_placement(float hitbox_x, float hitbox_y,
+                                                     bool facing_left, int sprite_width,
+                                                     int sprite_height) {
+    const float center_x = hitbox_x + PlayerState::width * 0.5f;
+    const float center_y = hitbox_y + PlayerState::height * 0.5f;
+    const float facing_dx = facing_left ? 4.0f : -2.0f;
+    const float draw_x = center_x - static_cast<float>(sprite_width) * 0.5f + facing_dx;
+    const float draw_y = center_y - static_cast<float>(sprite_height) * 0.5f - 7.0f;
+    return {draw_x, draw_y, false};
+}
+
+bool powerup_flicker_visible(int ticks_remaining) {
+    if (ticks_remaining <= 0) {
+        return false;
+    }
+    if (ticks_remaining > kPowerupFlickerStartTicks) {
+        return true;
+    }
+    return (ticks_remaining / kPowerupFlickerPeriodTicks) % 2 == 0;
+}
+
+std::uint8_t player_draw_alpha(const PlayerState& player) {
+    if (!player.has_invis()) {
+        return 255;
+    }
+    if (powerup_flicker_visible(player.powerup_invis_ticks_remaining())) {
+        return 200;
+    }
+    return 255;
+}
+
+bool player_invul_penta_visible(const PlayerState& player) {
+    return player.has_invul() && powerup_flicker_visible(player.powerup_invul_ticks_remaining());
+}
+
+PlayerOverlayTint player_invul_overlay(const PlayerState& player) {
+    if (!player.has_invul() ||
+        !powerup_flicker_visible(player.powerup_invul_ticks_remaining())) {
+        return {};
+    }
+    return {true, 191, 191, 191, 128};
+}
+
+PlayerOverlayTint player_suit_overlay(const PlayerState& player) {
+    if (!player.has_suit() || !powerup_flicker_visible(player.powerup_suit_ticks_remaining())) {
+        return {};
+    }
+    return {true, 0, 96, 0, 200};
+}
+
+PlayerOverlayTint player_berserk_overlay(const PlayerState& player) {
+    if (!player.has_berserk()) {
+        return {};
+    }
+    return {true, 255, 0, 0, 120};
+}
+
+PlayerOverlayTint player_pain_overlay(const PlayerState& player) {
+    const int pain_ticks = player.pain_ticks();
+    if (pain_ticks <= 0) {
+        return {};
+    }
+
+    const int level = std::min(5, pain_ticks / 4);
+    const std::uint8_t alpha = static_cast<std::uint8_t>(255 - level * 50);
+    return {true, 255, 0, 0, alpha};
+}
+
+PlayerCorpseDraw player_corpse_draw(bool mess) {
+    const PlayerAnim anim = mess ? PlayerAnim::Die2 : PlayerAnim::Die1;
+    const auto set = player_sprite_set(anim);
+    return {anim, std::max(0, set.body.frame_count - 1)};
+}
+
+const char* player_gib_body_texture_id() {
+    return "tex.tile.gibs";
+}
+
+const char* player_gib_mask_texture_id() {
+    return "tex.tile.gibsmask";
 }
 
 } // namespace d2df::sim

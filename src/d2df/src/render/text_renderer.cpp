@@ -64,6 +64,25 @@ bool TextRenderer::init(const std::filesystem::path& content_root) {
     return false;
 }
 
+int TextRenderer::measure_width(std::string_view text) const {
+    if (font_ == nullptr || text.empty()) {
+        return 0;
+    }
+
+    int width = 0;
+    int height = 0;
+    if (TTF_SizeUTF8(font_, std::string(text).c_str(), &width, &height) != 0) {
+        return 0;
+    }
+    return width;
+}
+
+void TextRenderer::draw_right(SDL_Renderer* renderer, std::string_view text, int right_x, int y,
+                              std::uint8_t r, std::uint8_t g, std::uint8_t b) const {
+    const int width = measure_width(text);
+    draw(renderer, text, right_x - width, y, r, g, b);
+}
+
 void TextRenderer::draw(SDL_Renderer* renderer, std::string_view text, int x, int y,
                         std::uint8_t r, std::uint8_t g, std::uint8_t b) const {
     if (font_ == nullptr || text.empty()) {

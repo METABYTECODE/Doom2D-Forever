@@ -58,7 +58,29 @@ constexpr float kPlayerSpriteWidth = 64.0f;
 constexpr float kPlayerSpriteHeight = 64.0f;
 
 constexpr int kPlayerPainTicks = 18;
-constexpr int kPlayerDie1Ticks = 24;
+constexpr int kPlayerDie1Frames = 7;
+constexpr int kPlayerDie1FramePeriod = 3;
+constexpr int kPlayerDie2Frames = 9;
+constexpr int kPlayerDie2FramePeriod = 2;
+constexpr int kPlayerDieHardHealthThreshold = -30;
+constexpr int kPlayerDie1Ticks = kPlayerDie1Frames * kPlayerDie1FramePeriod;
+constexpr int kPlayerRespawnTicks = 54;
+constexpr int kPlayerPunchFrames = 4;
+constexpr float kPlayerCorpseHitboxOffsetX = 15.0f;
+constexpr float kPlayerCorpseHitboxOffsetY = 48.0f;
+constexpr float kPlayerCorpseHitboxWidth = 34.0f;
+constexpr float kPlayerCorpseHitboxHeight = 16.0f;
+constexpr float kPlayerPunchOffsetY = 11.0f;
+constexpr int kPowerupFlickerStartTicks = 76;
+constexpr int kPowerupFlickerPeriodTicks = 11;
+
+struct PlayerOverlayTint {
+    bool active = false;
+    std::uint8_t r = 0;
+    std::uint8_t g = 0;
+    std::uint8_t b = 0;
+    std::uint8_t a = 0;
+};
 
 [[nodiscard]] PlayerAnim resolve_player_anim(bool on_ground, int vel_x, bool aim_up, bool aim_down,
                                              bool firing, WeaponId weapon, int pain_ticks,
@@ -82,5 +104,45 @@ constexpr int kPlayerDie1Ticks = 24;
 [[nodiscard]] int player_anim_frame_index(PlayerAnim anim, int tick, int vel_x);
 
 [[nodiscard]] PlayerTeamColor default_player_team_color();
+
+[[nodiscard]] const char* player_punch_texture_id(bool aim_up, bool aim_down, bool berserk);
+
+[[nodiscard]] PlayerSpritePlacement player_punch_placement(float hitbox_x, float hitbox_y,
+                                                           bool facing_left);
+
+[[nodiscard]] int player_punch_frame_index(int punch_ticks);
+
+[[nodiscard]] const char* player_model_pain_sfx(int damage_amount, int tick);
+
+[[nodiscard]] const char* player_model_death_sfx();
+
+[[nodiscard]] PlayerSpritePlacement player_invul_penta_placement(float hitbox_x, float hitbox_y,
+                                                                 bool facing_left, int sprite_width,
+                                                                 int sprite_height);
+
+[[nodiscard]] bool powerup_flicker_visible(int ticks_remaining);
+
+[[nodiscard]] std::uint8_t player_draw_alpha(const PlayerState& player);
+
+[[nodiscard]] bool player_invul_penta_visible(const PlayerState& player);
+
+[[nodiscard]] PlayerOverlayTint player_invul_overlay(const PlayerState& player);
+
+[[nodiscard]] PlayerOverlayTint player_suit_overlay(const PlayerState& player);
+
+[[nodiscard]] PlayerOverlayTint player_berserk_overlay(const PlayerState& player);
+
+[[nodiscard]] PlayerOverlayTint player_pain_overlay(const PlayerState& player);
+
+struct PlayerCorpseDraw {
+    PlayerAnim anim = PlayerAnim::Die1;
+    int frame_index = 0;
+};
+
+[[nodiscard]] PlayerCorpseDraw player_corpse_draw(bool mess);
+
+[[nodiscard]] const char* player_gib_body_texture_id();
+
+[[nodiscard]] const char* player_gib_mask_texture_id();
 
 } // namespace d2df::sim

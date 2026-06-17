@@ -21,6 +21,9 @@ public:
     bool init(const std::filesystem::path& content_root);
     void draw(SDL_Renderer* renderer, std::string_view text, int x, int y,
               std::uint8_t r = 220, std::uint8_t g = 220, std::uint8_t b = 230) const;
+    [[nodiscard]] int measure_width(std::string_view text) const;
+    void draw_right(SDL_Renderer* renderer, std::string_view text, int right_x, int y,
+                    std::uint8_t r = 220, std::uint8_t g = 220, std::uint8_t b = 230) const;
 
 private:
     TTF_Font* font_ = nullptr;

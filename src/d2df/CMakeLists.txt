@@ -80,6 +80,7 @@ add_library(d2df_sim STATIC
     src/sim/item_system.cpp
     src/sim/map_collision.cpp
     src/sim/monster_system.cpp
+    src/sim/player_corpse_system.cpp
     src/sim/player_state.cpp
     src/sim/lift_system.cpp
     src/sim/projectile_system.cpp
@@ -109,6 +110,7 @@ target_link_libraries(d2df_sim
 d2df_set_warnings(d2df_sim)
 
 add_library(d2df_audio STATIC
+    src/audio/player_continuous_sfx.cpp
     src/audio/sound_system.cpp
 )
 
@@ -123,6 +125,7 @@ target_link_libraries(d2df_audio
     PUBLIC
         d2df::core
         d2df::resources
+        d2df::sim
         SDL2_mixer::SDL2_mixer
 )
 
@@ -130,6 +133,7 @@ d2df_set_warnings(d2df_audio)
 
 add_library(d2df_render STATIC
     src/render/camera2d.cpp
+    src/render/hud_layout.cpp
     src/render/map_renderer.cpp
     src/render/text_renderer.cpp
     src/render/texture_cache.cpp

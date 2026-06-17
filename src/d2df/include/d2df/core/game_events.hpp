@@ -52,6 +52,8 @@ struct PlayerFired {
     float origin_y = 0.f;
     float aim_x = 0.f;
     float aim_y = 0.f;
+    /// For melee weapons: whether the swing connected.
+    bool melee_hit = true;
 };
 
 struct EntityDamaged {
