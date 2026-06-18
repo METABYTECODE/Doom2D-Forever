@@ -20,7 +20,7 @@
 #include <d2df/map/map_catalog.hpp>
 #include <d2df/core/types.hpp>
 #include <d2df/map/item_types.hpp>
-#include <d2df/game/gameplay_session.hpp>
+#include <d2df/map/map_json_loader.hpp>
 #include <d2df/map/monster_types.hpp>
 #include <d2df/map/trigger_types.hpp>
 #include <d2df/sim/item_system.hpp>
@@ -136,7 +136,7 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                     return;
                 }
                 if (weapon == sim::WeaponId::Bfg) {
-                    const auto& combat = session_.world().player().combat();
+                    const auto& combat = world_.player().combat();
                     if (combat.bfg_charge_ticks > 0) {
                         sound_.play("sfx.world.startfirebfg");
                     } else {
@@ -214,7 +214,7 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                 }
                 if (event.health_remaining > 0) {
                     if (const char* pain_sfx = sim::player_model_pain_sfx(
-                            event.amount, session_.world().player().tick())) {
+                            event.amount, world_.player().tick())) {
                         sound_.play(pain_sfx);
                     }
                 }
@@ -225,7 +225,7 @@ MapViewer::MapViewer(SDL_Renderer* renderer, std::filesystem::path content_root,
                 }
             });
             events_->subscribe<events::PlayerLanded>([this](const events::PlayerLanded&) {
-                const auto& player = session_.world().player();
+                const auto& player = world_.player();
                 if (!player.in_water()) {
                     return;
                 }
@@ -253,19 +253,23 @@ core::ResourceSnapshot MapViewer::build_resource_snapshot() const {
     }
     snapshot.sfx_chunks = sound_.cached_chunk_count();
     snapshot.music_tracks = sound_.cached_music_count();
-    snapshot.projectiles = session_.world().projectiles().projectiles().size();
-    snapshot.items = session_.world().items().items().size();
-    snapshot.monsters = session_.world().targets().size();
+    snapshot.projectiles = world_.projectiles().projectiles().size();
+    snapshot.items = world_.items().items().size();
+    snapshot.monsters = world_.targets().size();
     snapshot.effects = effects_.size();
     return snapshot;
 }
 
 void MapViewer::load_map(const std::filesystem::path& map_path) {
     current_map_path_ = map_path;
-    session_.load(map_path);
+    map_ = map::load_map_json_v1(map_path);
+    triggers_.reset(map_);
+    collision_.build_from_panels(triggers_.panels());
+    map_render_index_.build(map_);
+    world_.reset_player(map_);
     textures_ = std::make_unique<render::TextureCache>(renderer_, assets_);
-    camera_.center_x = session_.world().player().x + session_.world().player().width * 0.5f;
-    camera_.center_y = session_.world().player().y + session_.world().player().height * 0.5f;
+    camera_.center_x = world_.player().x + world_.player().width * 0.5f;
+    camera_.center_y = world_.player().y + world_.player().height * 0.5f;
     camera_.scale = 2;
     free_camera_ = false;
 
@@ -277,11 +281,11 @@ void MapViewer::load_map(const std::filesystem::path& map_path) {
     reset_session_stats();
 
     spdlog::info("Map [{}/{}]: {} ({}x{}, {} panels, {} areas)", map_index_ + 1,
-                 map_list_.size(), session_.legacy_map().name, session_.legacy_map().size.width, session_.legacy_map().size.height, session_.legacy_map().panels.size(),
-                 session_.legacy_map().areas.size());
+                 map_list_.size(), map_.name, map_.size.width, map_.size.height, map_.panels.size(),
+                 map_.areas.size());
 
-    if (sound_.enabled() && !session_.legacy_map().music.empty()) {
-        sound_.play_music(session_.legacy_map().music.c_str());
+    if (sound_.enabled() && !map_.music.empty()) {
+        sound_.play_music(map_.music.c_str());
     }
 }
 
@@ -311,12 +315,12 @@ void MapViewer::cycle_map(int direction) {
 
 void MapViewer::reset_session_stats() {
     session_stats_ = {};
-    for (const auto& monster : session_.legacy_map().monsters) {
+    for (const auto& monster : map_.monsters) {
         if (monster.type != map::MonsterType::None) {
             ++session_stats_.monsters_total;
         }
     }
-    for (const auto& trigger : session_.legacy_map().triggers) {
+    for (const auto& trigger : map_.triggers) {
         if (trigger.type == map::TriggerType::Secret) {
             ++session_stats_.secrets_total;
         }
@@ -422,8 +426,8 @@ std::string MapViewer::current_map_rel_path() const {
 
 void MapViewer::save_quicksave() {
     sim::GameSaveDocument doc;
-    sim::capture_world_save(session_.world(), session_.triggers(), current_map_rel_path(),
-                            session_.legacy_map().id, doc);
+    sim::capture_world_save(world_, triggers_, current_map_rel_path(),
+                            map_.id, doc);
 
     std::string error;
     const auto path = quicksave_path();
@@ -460,9 +464,9 @@ void MapViewer::load_quicksave() {
         }
     }
 
-    sim::restore_world_save(session_.world(), session_.triggers(), doc);
-    session_.collision().build_from_panels(session_.triggers().panels());
-    session_.sync_runtime_tiles();
+    sim::restore_world_save(world_, triggers_, doc);
+    collision_.build_from_panels(triggers_.panels());
+    sync_runtime_tiles();
     continuous_sfx_.reset();
     effects_.clear();
     paused_ = false;
@@ -701,6 +705,11 @@ void MapViewer::handle_mouse_wheel(int y) {
     }
 }
 
+void MapViewer::sync_runtime_tiles() {
+    map_.panels = triggers_.panels();
+    map_render_index_.build(map_);
+}
+
 void MapViewer::fixed_update() {
     core::ScopedPerfRegion sim_scope(core::PerfRegion::SimFixed);
     if (session_view_ == SessionView::Intermission) {
@@ -748,24 +757,29 @@ void MapViewer::fixed_update() {
     weapon_select_request_ = -1;
     key_weapon_prev_ = false;
 
-    auto& player = session_.world().player();
+    auto& player = world_.player();
     const bool fire_held = input.fire;
     {
         core::ScopedPerfRegion sim_scope(core::PerfRegion::SimCollision);
-        session_.fixed_update(input, events_, key_use_edge_);
+        collision_.build_from_panels(triggers_.panels());
+        world_.fixed_update(collision_, input, events_, map_.size.width, map_.size.height,
+                            &triggers_);
+        triggers_.update(player, key_use_edge_, events_, &world_.targets(), &collision_);
+        collision_.build_from_panels(triggers_.panels());
+        sync_runtime_tiles();
     }
     key_use_edge_ = false;
 
     ++session_stats_.elapsed_ticks;
 
-    continuous_sfx_.tick(session_.world().player(), session_.world().player().combat(), fire_held);
+    continuous_sfx_.tick(world_.player(), world_.player().combat(), fire_held);
 
-    if (session_.world().player().ready_to_respawn()) {
-        session_.world().respawn_player();
+    if (world_.player().ready_to_respawn()) {
+        world_.respawn_player();
         continuous_sfx_.reset();
     }
 
-    if (session_.triggers().consume_exit_request()) {
+    if (triggers_.consume_exit_request()) {
         if (events_ != nullptr) {
             events_->publish(events::MapExitRequested{});
         }
@@ -783,9 +797,9 @@ void MapViewer::update_camera_follow(float render_alpha) {
     if (free_camera_) {
         return;
     }
-    const auto& player = session_.world().player();
+    const auto& player = world_.player();
     if (!player.alive() && player.corpse_resolved()) {
-        const auto& corpse_system = session_.world().player_corpses();
+        const auto& corpse_system = world_.player_corpses();
         if (const sim::PlayerCorpse* corpse = corpse_system.tracked_corpse()) {
             const float corpse_x = corpse->prev_x + (corpse->x - corpse->prev_x) * render_alpha;
             const float corpse_y = corpse->prev_y + (corpse->y - corpse->prev_y) * render_alpha;
@@ -824,11 +838,11 @@ void MapViewer::update(float frame_dt) {
 }
 
 void MapViewer::draw_sky(int viewport_w, int viewport_h) {
-    if (session_.legacy_map().sky.empty() || textures_ == nullptr) {
+    if (map_.sky.empty() || textures_ == nullptr) {
         return;
     }
 
-    SDL_Texture* sky = textures_->get(session_.legacy_map().sky);
+    SDL_Texture* sky = textures_->get(map_.sky);
     if (sky == nullptr) {
         return;
     }
@@ -927,7 +941,7 @@ void MapViewer::draw_player(int viewport_w, int viewport_h) {
         return;
     }
 
-    const auto& player = session_.world().player();
+    const auto& player = world_.player();
     if (!player.alive() && player.corpse_resolved()) {
         return;
     }
@@ -1049,7 +1063,7 @@ void MapViewer::draw_player_corpses(int viewport_w, int viewport_h) {
     const float alpha = fixed_timestep_.render_alpha();
     const auto team_color = sim::default_player_team_color();
 
-    for (const auto& corpse : session_.world().player_corpses().corpses()) {
+    for (const auto& corpse : world_.player_corpses().corpses()) {
         if (!corpse.active) {
             continue;
         }
@@ -1087,7 +1101,7 @@ void MapViewer::draw_player_corpses(int viewport_w, int viewport_h) {
         return;
     }
 
-    for (const auto& gib : session_.world().player_corpses().gibs()) {
+    for (const auto& gib : world_.player_corpses().gibs()) {
         if (!gib.active) {
             continue;
         }
@@ -1137,7 +1151,7 @@ void MapViewer::draw_projectiles(int viewport_w, int viewport_h) {
         return;
     }
 
-    for (const auto& projectile : session_.world().projectiles().projectiles()) {
+    for (const auto& projectile : world_.projectiles().projectiles()) {
         if (!projectile.active) {
             continue;
         }
@@ -1246,7 +1260,7 @@ void MapViewer::draw_items(int viewport_w, int viewport_h, bool monster_drops_on
 
     SDL_Texture* respawn_texture = textures_->get("tex.ui.itemrespawn");
 
-    for (const auto& item : session_.world().items().items()) {
+    for (const auto& item : world_.items().items()) {
         if (item.dropped != monster_drops_only) {
             continue;
         }
@@ -1377,7 +1391,7 @@ void MapViewer::draw_targets(int viewport_w, int viewport_h) {
         return;
     }
 
-    for (const auto& target : session_.world().targets()) {
+    for (const auto& target : world_.targets()) {
         const bool draw_corpse = target.is_monster() &&
                                  (target.is_corpse() || target.is_reviving());
         if (!target.alive() && !draw_corpse) {
@@ -1597,7 +1611,7 @@ void MapViewer::draw_effects(int viewport_w, int viewport_h) {
 }
 
 void MapViewer::draw_hud(int viewport_w, int viewport_h) {
-    const auto& player = session_.world().player();
+    const auto& player = world_.player();
     const auto& combat = player.combat();
     const auto metrics = render::hud_metrics(viewport_w, viewport_h);
     using HL = render::HudLayout;
@@ -1714,7 +1728,7 @@ void MapViewer::draw_hud(int viewport_w, int viewport_h) {
         draw_bar_fill(HL::kBarFillX, HL::kAirFillY, air_fill, 0, 0, 196);
     }
 
-    const std::string footer = session_.legacy_map().name + "  [" + std::to_string(map_index_ + 1) + "/" +
+    const std::string footer = map_.name + "  [" + std::to_string(map_index_ + 1) + "/" +
                                std::to_string(map_list_.size()) +
                                "]  ESC pause  F5 save  F9 load  Q/E weapons";
     text_.draw(renderer_, footer, 8, viewport_h - 20, 180, 180, 190);
@@ -1751,7 +1765,7 @@ void MapViewer::draw_intermission(int viewport_w, int viewport_h) {
 
     const int line_height = 22;
     const int panel_y = viewport_h / 2 - 60;
-    const std::string title = session_.legacy_map().name.empty() ? "LEVEL COMPLETE" : session_.legacy_map().name;
+    const std::string title = map_.name.empty() ? "LEVEL COMPLETE" : map_.name;
     text_.draw(renderer_, title, viewport_w / 2 - text_.measure_width(title) / 2, panel_y, 255,
                220, 120);
 
@@ -1832,7 +1846,7 @@ void MapViewer::draw_player_overlays(int viewport_w, int viewport_h) {
     }
 
     const int game_w = render::game_viewport_width(viewport_w);
-    const auto& player = session_.world().player();
+    const auto& player = world_.player();
 
     auto draw_tint = [&](const sim::PlayerOverlayTint& tint) {
         if (!tint.active || tint.a == 0) {
@@ -1875,9 +1889,8 @@ void MapViewer::render(int viewport_w, int viewport_h) {
     {
         core::ScopedPerfRegion world_scope(core::PerfRegion::MapRenderWorld);
         draw_sky(game_w, viewport_h);
-        session_.sync_runtime_tiles();
-        tile_map_renderer_.draw(renderer_, session_.runtime_tiles(), *textures_, camera_, game_w, viewport_h,
-                                &session_.tile_render_index());
+        sync_runtime_tiles();
+        map_renderer_.draw(renderer_, map_, *textures_, camera_, game_w, viewport_h, &map_render_index_);
         draw_items(game_w, viewport_h, false);
         draw_player(game_w, viewport_h);
         draw_player_corpses(game_w, viewport_h);
@@ -1922,12 +1935,12 @@ void MapViewer::draw_debug_overlays(int viewport_w, int viewport_h) {
     perf.effects = snapshot.effects;
 
     const debug::DebugWorldView world{
-        session_.world().player(),
-        session_.world().targets(),
-        session_.world().projectiles(),
-        session_.collision(),
-        session_.triggers().map_view(session_.legacy_map()),
-        session_.triggers(),
+        world_.player(),
+        world_.targets(),
+        world_.projectiles(),
+        collision_,
+        triggers_.map_view(map_),
+        triggers_,
         fixed_timestep_.render_alpha(),
     };
     debug_ui_->draw_world(renderer_, camera_, viewport_w, viewport_h, world);

@@ -10,7 +10,7 @@ add_executable(d2df_tests
     test_perf.cpp
     test_sim.cpp
     test_engine.cpp
-    test_game.cpp
+    test_level.cpp
 )
 
 target_link_libraries(d2df_tests
@@ -19,8 +19,8 @@ target_link_libraries(d2df_tests
         d2df::core_impl
         d2df::sim
         d2df::render
-        d2df::engine
-        d2df::game
+        rivet::engine
+        rivet::game
         Catch2::Catch2WithMain
 )
 

@@ -11,6 +11,7 @@
     "fmt",
     "catch2",
     "zlib",
-    "stb"
+    "stb",
+    "nlohmann-json"
   ]
 }

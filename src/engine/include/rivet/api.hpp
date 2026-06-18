@@ -1,0 +1,30 @@
+#pragma once
+
+/// Stable public API for game projects. Prefer this header over engine.hpp.
+#include <rivet/core/application.hpp>
+#include <rivet/core/clock.hpp>
+#include <rivet/core/fixed_timestep.hpp>
+#include <rivet/core/game.hpp>
+#include <rivet/core/game_context.hpp>
+#include <rivet/core/log.hpp>
+#include <rivet/core/service_registry.hpp>
+#include <rivet/ecs/components/collider.hpp>
+#include <rivet/ecs/components/transform.hpp>
+#include <rivet/ecs/world.hpp>
+#include <rivet/input/input_system.hpp>
+#include <rivet/input/keys.hpp>
+#include <rivet/physics/aabb.hpp>
+#include <rivet/physics/physics_world.hpp>
+#include <rivet/platform/bootstrap.hpp>
+#include <rivet/platform/window_config.hpp>
+#include <rivet/render/camera2d.hpp>
+#include <rivet/render/color.hpp>
+#include <rivet/render/rect.hpp>
+#include <rivet/render/irenderer.hpp>
+#include <rivet/render/renderer_backend.hpp>
+#include <rivet/render/renderer_factory.hpp>
+#include <rivet/resources/png_writer.hpp>
+#include <rivet/resources/resource_manager.hpp>
+#include <rivet/resources/texture.hpp>
+#include <rivet/scene/scene.hpp>
+#include <rivet/scene/scene_manager.hpp>

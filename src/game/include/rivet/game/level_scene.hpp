@@ -1,0 +1,26 @@
+#pragma once
+
+#include <rivet/game/level/level_data.hpp>
+#include <rivet/game/level/level_spawner.hpp>
+#include <rivet/scene/scene.hpp>
+
+namespace rivet::game {
+
+class LevelScene final : public rivet::scene::Scene {
+public:
+    explicit LevelScene(level::LevelData data);
+
+    [[nodiscard]] const level::LevelData& data() const { return data_; }
+    [[nodiscard]] rivet::ecs::Entity player_entity() const { return spawn_.player; }
+    [[nodiscard]] float world_width() const { return spawn_.world_width; }
+    [[nodiscard]] float world_height() const { return spawn_.world_height; }
+
+protected:
+    void on_enter() override;
+
+private:
+    level::LevelData data_;
+    level::LevelSpawnResult spawn_;
+};
+
+} // namespace rivet::game

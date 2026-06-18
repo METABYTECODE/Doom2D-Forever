@@ -1,134 +1,253 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <d2df/map/map_document.hpp>
-#include <d2df/map/panel_types.hpp>
-#include <d2df/engine/map/legacy_map_adapter.hpp>
-#include <d2df/engine/map/map_loader.hpp>
-#include <d2df/engine/map/tile_flags.hpp>
-#include <d2df/engine/map/tile_map_json.hpp>
-#include <d2df/engine/runtime/map_session.hpp>
+#include <rivet/core/application.hpp>
+#include <rivet/core/game_context.hpp>
+#include <rivet/ecs/components/collider.hpp>
+#include <rivet/ecs/components/transform.hpp>
+#include <rivet/mod/api.hpp>
+#include <rivet/mod/command.hpp>
+#include <rivet/mod/event.hpp>
+#include <rivet/physics/aabb.hpp>
+#include <rivet/physics/physics_world.hpp>
+#include <rivet/render/camera2d.hpp>
+#include <rivet/render/renderer_backend.hpp>
+#include <rivet/render/renderer_factory.hpp>
+#include <rivet/scene/scene.hpp>
 
 namespace {
 
-d2df::engine::map::TileMap make_floor_map() {
-    d2df::engine::map::TileMap map;
-    map.width = 800;
-    map.height = 600;
+class CounterScene final : public rivet::scene::Scene {
+public:
+    CounterScene()
+        : Scene("counter") {}
 
-    d2df::engine::map::TileLayer layer;
-    layer.name = "floor";
-    d2df::engine::map::TilePlacement floor;
-    floor.x = 0;
-    floor.y = 500;
-    floor.width = 800;
-    floor.height = 100;
-    floor.flags = d2df::engine::map::TILE_WALL;
-    layer.tiles.push_back(floor);
-    map.layers.push_back(layer);
+    [[nodiscard]] int ticks() const { return ticks_; }
 
-    map.spawns.push_back({"player1", 100, 400});
-    return map;
-}
+protected:
+    void on_fixed_update(float fixed_delta_time) override {
+        (void)fixed_delta_time;
+        ++ticks_;
+    }
+
+private:
+    int ticks_ = 0;
+};
 
 } // namespace
 
-TEST_CASE("MapSession loads tile map and moves player on solid floor", "[engine]") {
-    d2df::engine::MapSession session;
-    session.load(make_floor_map());
+TEST_CASE("Application runs fixed updates through active scene", "[engine]") {
+    class TestApp final : public rivet::core::Application {
+    public:
+        void bootstrap(std::unique_ptr<CounterScene> scene) {
+            scenes().push(std::move(scene));
+        }
+        [[nodiscard]] CounterScene* counter_scene() {
+            return static_cast<CounterScene*>(scenes().active());
+        }
+    };
 
-    const auto start_y = session.world().player().y;
+    TestApp app;
+    app.bootstrap(std::make_unique<CounterScene>());
 
-    d2df::engine::MovementInput move_right;
-    move_right.right = true;
-
-    for (int i = 0; i < 36; ++i) {
-        session.fixed_tick(move_right);
+    for (int i = 0; i < 5; ++i) {
+        app.run_one_frame(1.0f / 60.0f);
     }
 
-    CHECK(session.world().player().x > 100.0f);
-    CHECK(session.world().player().on_ground());
-
-    d2df::engine::MovementInput jump;
-    jump.jump = true;
-    for (int i = 0; i < 8; ++i) {
-        session.fixed_tick(jump);
-    }
-
-    CHECK(session.world().player().y < start_y);
+    REQUIRE(app.counter_scene() != nullptr);
+    CHECK(app.counter_scene()->ticks() == 5);
 }
 
-TEST_CASE("MapSession spawns entity bodies from tile map", "[engine]") {
-    auto map = make_floor_map();
-    map.entities.push_back({"zomby", 120, 80, 0.0f, 0.0f});
+TEST_CASE("SceneManager push pop maintains single active scene", "[engine]") {
+    rivet::scene::SceneManager manager;
+    manager.push(std::make_unique<rivet::scene::Scene>("a"));
+    CHECK(manager.count() == 1);
+    CHECK(manager.active()->name() == "a");
+    CHECK(manager.active()->is_active());
 
-    d2df::engine::MapSession session;
-    session.load(std::move(map));
+    manager.push(std::make_unique<rivet::scene::Scene>("b"));
+    CHECK(manager.count() == 2);
+    CHECK(manager.active()->name() == "b");
 
-    CHECK(session.world().entity_entities().size() == 1);
-
-    const auto entity = session.world().entity_entities().front();
-    const auto& registry = session.world().registry();
-    CHECK(registry.all_of<d2df::engine::ecs::Collider>(entity));
-    CHECK(registry.all_of<d2df::engine::ecs::MonsterTag>(entity));
+    manager.pop();
+    CHECK(manager.count() == 1);
+    CHECK(manager.active()->name() == "a");
 }
 
-TEST_CASE("Player collides with solid map entity", "[engine]") {
-    auto map = make_floor_map();
-    map.entities.push_back({"zomby", 150, 400, 34.0f, 52.0f});
+TEST_CASE("ECS world creates entities with components", "[engine]") {
+    rivet::ecs::World world;
+    const auto entity = world.create();
+    world.registry().emplace<rivet::ecs::components::Transform>(
+        entity, rivet::ecs::components::Transform{.x = 10.0f, .y = 20.0f});
 
-    d2df::engine::MapSession session;
-    session.load(std::move(map));
-
-    d2df::engine::MovementInput move_right;
-    move_right.right = true;
-
-    for (int i = 0; i < 12; ++i) {
-        session.fixed_tick(move_right);
-    }
-
-    const auto& player = session.world().player();
-    CHECK(player.x + player.width <= 150.0f + 1.0f);
+    CHECK(world.registry().all_of<rivet::ecs::components::Transform>(entity));
+    CHECK(world.registry().get<rivet::ecs::components::Transform>(entity).x == 10.0f);
 }
 
-TEST_CASE("Native tile map JSON loads format d2df-tilemap", "[engine]") {
-    const std::string json = R"({
-        "format": "d2df-tilemap",
-        "version": 1,
-        "id": "test",
-        "world": { "width": 320, "height": 240 },
-        "layers": [
-            {
-                "name": "walls",
-                "tiles": [
-                    { "x": 0, "y": 200, "w": 320, "h": 40, "flags": ["wall"] }
-                ]
-            }
-        ],
-        "spawns": [ { "id": "player1", "x": 40, "y": 120 } ],
-        "entities": [ { "type": "imp", "x": 80, "y": 100 } ]
-    })";
+TEST_CASE("Mod API emits events and routes commands", "[engine][mod]") {
+    class ModApp final : public rivet::core::Application {
+    public:
+        void bootstrap() {
+            scenes().push(std::make_unique<rivet::scene::Scene>("level"));
+        }
+    };
 
-    const auto map = d2df::engine::map::load_tile_map_json_string(json);
-    CHECK(map.id == "test");
-    CHECK(map.width == 320);
-    CHECK(map.layers.size() == 1);
-    CHECK(map.layers[0].tiles.size() == 1);
-    CHECK(map.spawns.size() == 1);
-    CHECK(map.entities.size() == 1);
-    CHECK(map.entities[0].height > 0.0f);
+    ModApp app;
+    app.bootstrap();
+
+    int tick_count = 0;
+    app.mod_api().events().subscribe("OnTick", [&](const rivet::mod::Event& event) {
+        ++tick_count;
+        CHECK(event.name == "OnTick");
+        CHECK(rivet::mod::variant_as_number(event.data.at("dt")).has_value());
+    });
+
+    bool command_ran = false;
+    app.mod_api().commands().register_handler("play_sound", [&](const rivet::mod::Command& cmd) {
+        command_ran = true;
+        CHECK(rivet::mod::variant_as_string(cmd.args.at("id")) == "door_open");
+        return rivet::mod::CommandStatus::Ok;
+    });
+
+    app.mod_api().enqueue_command(rivet::mod::Command{
+        .name = "play_sound",
+        .args = {{"id", std::string("door_open")}},
+    });
+
+    app.run_one_frame(1.0f / 60.0f);
+
+    CHECK(tick_count == 1);
+    CHECK(command_ran);
 }
 
-TEST_CASE("Legacy map document converts to tile map", "[engine]") {
-    d2df::map::MapDocument legacy;
-    legacy.size.width = 200;
-    legacy.size.height = 150;
-    legacy.panels.push_back({});
-    legacy.panels.back().position = {0, 100};
-    legacy.panels.back().size = {200, 50};
-    legacy.panels.back().type = d2df::map::PANEL_WALL;
+TEST_CASE("Mod data hook forwards opaque queries to registered handlers", "[engine][mod]") {
+    rivet::mod::Api api;
+    api.data().register_handler("runtime", [](const rivet::mod::DataQuery& query) {
+        if (query.path != "runtime") {
+            return std::optional<std::unordered_map<std::string, rivet::mod::Variant>>{};
+        }
+        return std::optional(std::unordered_map<std::string, rivet::mod::Variant>{
+            {{"frame", std::int64_t{42}}},
+        });
+    });
 
-    const auto tile_map = d2df::engine::map::tile_map_from_legacy(legacy);
-    CHECK(tile_map.width == 200);
-    CHECK(tile_map.layers.size() == 1);
-    CHECK(tile_map.layers[0].tiles.size() == 1);
+    const auto result = api.query_data({.path = "runtime"});
+    REQUIRE(result.has_value());
+    CHECK(rivet::mod::variant_as_int(result->at("frame")) == 42);
+    CHECK_FALSE(api.query_data({.path = "unknown"}).has_value());
+}
+
+TEST_CASE("Camera2D maps world space into screen space", "[engine][render]") {
+    rivet::render::Camera2D camera;
+    camera.set_viewport(800, 600);
+    camera.center_on(100.0f, 50.0f);
+
+    const auto screen = camera.world_to_screen({.x = 100.0f, .y = 50.0f, .width = 32.0f, .height = 32.0f});
+    CHECK(screen.x == 400.0f);
+    CHECK(screen.y == 300.0f);
+    CHECK(screen.width == 32.0f);
+}
+
+TEST_CASE("AABB overlap helpers detect intersections", "[engine][physics]") {
+    const rivet::physics::Aabb a{.x = 0.0f, .y = 0.0f, .width = 32.0f, .height = 32.0f};
+    const rivet::physics::Aabb b{.x = 16.0f, .y = 16.0f, .width = 32.0f, .height = 32.0f};
+    const rivet::physics::Aabb c{.x = 64.0f, .y = 64.0f, .width = 16.0f, .height = 16.0f};
+
+    CHECK(a.intersects(b));
+    CHECK_FALSE(a.intersects(c));
+}
+
+TEST_CASE("PhysicsWorld resolves static collisions", "[engine][physics]") {
+    using namespace rivet::ecs::components;
+
+    rivet::ecs::World world;
+    rivet::physics::PhysicsWorld physics;
+
+    const auto dynamic = world.create();
+    world.registry().emplace<Transform>(dynamic, Transform{.x = 10.0f, .y = 0.0f});
+    world.registry().emplace<Velocity>(dynamic, Velocity{.x = 100.0f, .y = 0.0f});
+    world.registry().emplace<Collider>(dynamic, Collider{.width = 16.0f, .height = 16.0f});
+
+    const auto wall = world.create();
+    world.registry().emplace<Transform>(wall, Transform{.x = 20.0f, .y = 0.0f});
+    world.registry().emplace<Collider>(wall, Collider{.width = 16.0f, .height = 16.0f, .is_static = true});
+
+    physics.step(world, 0.2f);
+
+    const auto& transform = world.registry().get<Transform>(dynamic);
+    const auto& wall_transform = world.registry().get<Transform>(wall);
+    const auto dynamic_box = rivet::physics::make_aabb(transform, world.registry().get<Collider>(dynamic));
+    const auto wall_box =
+        rivet::physics::make_aabb(wall_transform, world.registry().get<Collider>(wall));
+    CHECK_FALSE(dynamic_box.intersects(wall_box));
+}
+
+TEST_CASE("Application delegates lifecycle hooks to attached game", "[engine][game]") {
+    class ProbeGame final : public rivet::core::Game {
+    public:
+        void on_attach(rivet::core::GameContext& context) override {
+            context.scenes().push(std::make_unique<CounterScene>());
+            attached = true;
+        }
+
+        void on_update(rivet::core::GameContext& context, float delta_time) override {
+            (void)context;
+            (void)delta_time;
+            ++updates;
+        }
+
+        void on_fixed_update(rivet::core::GameContext& context, float fixed_delta_time) override {
+            (void)context;
+            (void)fixed_delta_time;
+            ++fixed_updates;
+        }
+
+        void on_render(rivet::core::GameContext& context, float interpolation_alpha) override {
+            (void)context;
+            (void)interpolation_alpha;
+            ++renders;
+        }
+
+        bool attached = false;
+        int updates = 0;
+        int fixed_updates = 0;
+        int renders = 0;
+    };
+
+    rivet::core::Application app;
+    ProbeGame game;
+    app.attach_game(game);
+
+    app.run_one_frame(1.0f / 60.0f);
+
+    CHECK(game.attached);
+    CHECK(game.updates == 1);
+    CHECK(game.fixed_updates == 1);
+    CHECK(game.renders == 1);
+    REQUIRE(app.scenes().active() != nullptr);
+    CHECK(app.scenes().active()->name() == "counter");
+}
+
+TEST_CASE("GameContext exposes stable engine services", "[engine][api]") {
+    rivet::core::Application app;
+    rivet::core::GameContext context(app);
+
+    CHECK(context.is_running());
+    context.request_quit();
+    CHECK_FALSE(context.is_running());
+}
+
+TEST_CASE("Renderer factory exposes backend availability", "[engine][render]") {
+    using rivet::render::RendererBackend;
+
+    CHECK(rivet::render::is_renderer_backend_available(RendererBackend::Sdl));
+    CHECK_FALSE(rivet::render::is_renderer_backend_available(RendererBackend::OpenGl));
+    CHECK(rivet::render::parse_renderer_backend("sdl") == RendererBackend::Sdl);
+    CHECK(rivet::render::parse_renderer_backend("opengl") == RendererBackend::OpenGl);
+    CHECK(rivet::render::to_string(RendererBackend::OpenGl) == "opengl");
+}
+
+TEST_CASE("Renderer factory rejects unavailable OpenGL backend", "[engine][render]") {
+    CHECK_THROWS_AS(
+        rivet::render::create_renderer(rivet::render::RendererBackend::OpenGl, {}),
+        std::runtime_error);
 }

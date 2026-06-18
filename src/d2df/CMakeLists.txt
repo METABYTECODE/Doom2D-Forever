@@ -233,7 +233,6 @@ target_link_libraries(d2df_app
     PUBLIC
         d2df::core
         d2df::core_impl
-        d2df::game
         d2df::render
         d2df::map
         d2df::sim

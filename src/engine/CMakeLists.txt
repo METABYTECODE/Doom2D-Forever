@@ -1,32 +1,46 @@
-add_library(d2df_engine STATIC
-    src/ecs/engine_world.cpp
-    src/map/entity_catalog.cpp
-    src/map/legacy_map_adapter.cpp
-    src/map/map_loader.cpp
-    src/map/tile_map_json.cpp
-    src/map/tile_map_sync.cpp
-    src/physics/collision_world.cpp
-    src/physics/entity_collision.cpp
-    src/render/tile_map_renderer.cpp
-    src/render/tile_map_render_index.cpp
-    src/runtime/map_session.cpp
+add_library(rivet_engine STATIC
+    src/core/application.cpp
+    src/core/clock.cpp
+    src/core/event_bus.cpp
+    src/core/fixed_timestep.cpp
+    src/core/game_context.cpp
+    src/ecs/world.cpp
+    src/input/input_system.cpp
+    src/physics/aabb.cpp
+    src/physics/physics_world.cpp
+    src/resources/png_writer.cpp
+    src/resources/resource_manager.cpp
+    src/scene/scene.cpp
+    src/scene/scene_manager.cpp
+    src/mod/api.cpp
+    src/mod/command_router.cpp
+    src/mod/data_query.cpp
+    src/mod/event_hub.cpp
+    src/platform/bootstrap.cpp
+    src/platform/sdl_platform.cpp
+    src/render/camera2d.cpp
+    src/render/renderer_backend.cpp
+    src/render/renderer_factory.cpp
+    src/render/sdl_renderer.cpp
 )
 
-add_library(d2df::engine ALIAS d2df_engine)
+add_library(rivet::engine ALIAS rivet_engine)
 
-target_include_directories(d2df_engine
+target_include_directories(rivet_engine
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        "${CMAKE_SOURCE_DIR}/src/d2df/include"
 )
 
-target_link_libraries(d2df_engine
+find_package(Stb REQUIRED)
+
+target_link_libraries(rivet_engine
     PUBLIC
-        d2df::core
-        d2df::map
-        d2df::sim
-        d2df::render
         EnTT::EnTT
+        spdlog::spdlog
+        fmt::fmt
+        SDL2::SDL2
 )
 
-d2df_set_warnings(d2df_engine)
+target_include_directories(rivet_engine PRIVATE ${Stb_INCLUDE_DIR})
+
+d2df_set_warnings(rivet_engine)

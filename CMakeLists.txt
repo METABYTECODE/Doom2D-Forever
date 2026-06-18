@@ -43,7 +43,7 @@ if(D2DF_BUILD_TOOLS)
 endif()
 
 add_subdirectory(src/d2df_client)
-add_subdirectory(src/d2df_engine_playground)
+add_subdirectory(src/rivet_playground)
 
 if(NOT D2DF_HEADLESS_SERVER)
     # Server stub links core library only (no SDL window in Phase 0).

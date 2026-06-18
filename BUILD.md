@@ -56,7 +56,7 @@ Used to build `assets/content/` from legacy WAD archives (not shipped in repo).
 | `d2df-wad-ls` | List DFWAD/ZIP entries |
 | `d2df-extract` | Legacy archives → staging folder |
 | `d2df-organize` | Staging → `assets/content/` with logical dirs |
-| `d2df-map-import` | `.mapbin` → JSON maps |
+| `d2df-tilemap-convert` | Legacy JSON → `d2df-tilemap` export |
 
 ```powershell
 .\build\tools\d2df_wad_ls\Release\d2df-wad-ls.exe path\to\game.WAD

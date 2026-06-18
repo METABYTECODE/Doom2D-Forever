@@ -47,6 +47,7 @@ struct MapTrigger {
     TriggerType type = TriggerType::None;
     bool enabled = true;
     std::int32_t target_panel = -1;
+    std::int32_t texture_panel = -1;
     ActivateType activate = ActivateType::None;
     MapPoint press_position;
     MapSize press_size;
@@ -56,6 +57,7 @@ struct MapTrigger {
     MapPoint teleport_target;
     bool d2d = false;
     std::uint8_t keys = 0;
+    std::string exit_map;
 };
 
 struct MapMonster {

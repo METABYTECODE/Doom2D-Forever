@@ -1,22 +1,28 @@
-add_library(d2df_game STATIC
-    src/game_map_bundle.cpp
-    src/gameplay_session.cpp
+add_library(rivet_game STATIC
+    src/bounce_game.cpp
+    src/bounce_scene.cpp
+    src/game_catalog.cpp
+    src/level/level_loader.cpp
+    src/level/level_spawner.cpp
+    src/level_game.cpp
+    src/level_scene.cpp
+    src/sandbox_game.cpp
+    src/sandbox_scene.cpp
 )
 
-add_library(d2df::game ALIAS d2df_game)
+add_library(rivet::game ALIAS rivet_game)
 
-target_include_directories(d2df_game
+target_include_directories(rivet_game
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        "${CMAKE_SOURCE_DIR}/src/d2df/include"
-        "${CMAKE_SOURCE_DIR}/src/engine/include"
 )
 
-target_link_libraries(d2df_game
+find_package(nlohmann_json CONFIG REQUIRED)
+
+target_link_libraries(rivet_game
     PUBLIC
-        d2df::engine
-        d2df::map
-        d2df::sim
+        rivet::engine
+        nlohmann_json::nlohmann_json
 )
 
-d2df_set_warnings(d2df_game)
+d2df_set_warnings(rivet_game)

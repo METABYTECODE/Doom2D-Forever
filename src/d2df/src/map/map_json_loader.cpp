@@ -473,6 +473,7 @@ std::vector<MapTrigger> parse_triggers(std::string_view json) {
         trigger.type = trigger_type_from_name(json_extract_string(object, "type").value_or(""));
         trigger.enabled = object.find("\"enabled\":false") == std::string_view::npos;
         trigger.target_panel = json_extract_panelid(object).value_or(-1);
+        trigger.texture_panel = json_extract_int(object, "texture_panel").value_or(-1);
 
         const auto activate_marker = "\"activate_type\":";
         const auto activate_start = object.find(activate_marker);
@@ -496,6 +497,7 @@ std::vector<MapTrigger> parse_triggers(std::string_view json) {
             trigger.press_count_required = json_extract_int(*data, "count").value_or(0);
             trigger.ext_random = json_extract_bool(*data, "ext_random").value_or(false);
             trigger.d2d = json_extract_bool(*data, "d2d").value_or(false);
+            trigger.exit_map = json_extract_string(*data, "map").value_or("");
         }
 
         const auto keys_marker = "\"keys\":";
