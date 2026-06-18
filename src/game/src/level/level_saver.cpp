@@ -34,26 +34,47 @@ namespace {
     return json;
 }
 
+[[nodiscard]] nlohmann::json placed_tile_to_json(const PlacedTile& tile) {
+    return {
+        {"tileset", tile.tileset},
+        {"id", tile.id},
+        {"x", tile.x},
+        {"y", tile.y},
+    };
+}
+
 } // namespace
 
 void save_level(const std::filesystem::path& path, const LevelData& level) {
     if (level.width <= 0 || level.height <= 0) {
         throw std::runtime_error("Cannot save level with non-positive dimensions");
     }
-    if (static_cast<int>(level.tiles.size()) != level.height) {
-        throw std::runtime_error("Level tile row count does not match height");
+    if (static_cast<int>(level.collision.size()) != level.height) {
+        throw std::runtime_error("Level collision row count does not match height");
     }
 
     nlohmann::json json = {
         {"format", LevelData::kFormatId},
         {"version", LevelData::kVersion},
         {"name", level.name},
-        {"tile_size", level.tile_size},
+        {"grid_size", level.grid_size},
         {"width", level.width},
         {"height", level.height},
-        {"tiles", level.tiles},
+        {"tiles", nlohmann::json::array()},
+        {"collision", level.collision},
         {"objects", nlohmann::json::array()},
     };
+
+    if (!level.background.empty()) {
+        json["background"] = level.background;
+    }
+    if (!level.music.empty()) {
+        json["music"] = level.music;
+    }
+
+    for (const auto& tile : level.tiles) {
+        json["tiles"].push_back(placed_tile_to_json(tile));
+    }
 
     for (const auto& object : level.objects) {
         json["objects"].push_back(object_to_json(object));

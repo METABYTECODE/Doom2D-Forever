@@ -1,0 +1,7 @@
+{
+    "name": "Example 16\u00d716",
+    "texture": "atlas16.png",
+    "tile_width": 16,
+    "tile_height": 16,
+    "columns": 23
+}

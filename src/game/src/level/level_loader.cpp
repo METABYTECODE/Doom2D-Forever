@@ -31,6 +31,107 @@ namespace {
     return object;
 }
 
+[[nodiscard]] PlacedTile parse_placed_tile(const nlohmann::json& json) {
+    PlacedTile tile;
+    tile.tileset = json.at("tileset").get<std::string>();
+    tile.id = json.at("id").get<int>();
+    tile.x = json.at("x").get<int>();
+    tile.y = json.at("y").get<int>();
+    return tile;
+}
+
+[[nodiscard]] std::vector<std::vector<int>> empty_collision_grid(const int width, const int height) {
+    return std::vector<std::vector<int>>(
+        static_cast<std::size_t>(height),
+        std::vector<int>(static_cast<std::size_t>(width), 0));
+}
+
+[[nodiscard]] LevelData load_level_v1(const nlohmann::json& json, const std::filesystem::path& path) {
+    LevelData level;
+    level.name = json.value("name", path.stem().string());
+
+    const int legacy_tile_size = json.value("tile_size", 32);
+    level.grid_size = 8;
+    const int scale = legacy_tile_size / level.grid_size;
+    if (scale < 1 || legacy_tile_size % level.grid_size != 0) {
+        throw std::runtime_error("Legacy tile_size must be a multiple of 8: " + path.string());
+    }
+
+    const auto legacy_tiles = json.at("tiles").get<std::vector<std::vector<int>>>();
+    const int legacy_height = json.value("height", static_cast<int>(legacy_tiles.size()));
+    const int legacy_width =
+        json.value("width", legacy_tiles.empty() ? 0 : static_cast<int>(legacy_tiles.front().size()));
+
+    level.width = legacy_width * scale;
+    level.height = legacy_height * scale;
+    level.collision = empty_collision_grid(level.width, level.height);
+
+    for (int y = 0; y < legacy_height; ++y) {
+        for (int x = 0; x < legacy_width; ++x) {
+            if (legacy_tiles[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] != 1) {
+                continue;
+            }
+            for (int dy = 0; dy < scale; ++dy) {
+                for (int dx = 0; dx < scale; ++dx) {
+                    level.collision[static_cast<std::size_t>(y * scale + dy)]
+                                   [static_cast<std::size_t>(x * scale + dx)] = 1;
+                }
+            }
+        }
+    }
+
+    if (json.contains("objects")) {
+        for (const auto& object_json : json.at("objects")) {
+            level.objects.push_back(parse_object(object_json));
+        }
+    }
+
+    return level;
+}
+
+[[nodiscard]] LevelData load_level_v2(const nlohmann::json& json, const std::filesystem::path& path) {
+    LevelData level;
+    level.name = json.value("name", path.stem().string());
+    level.grid_size = json.value("grid_size", 8);
+    level.width = json.value("width", 0);
+    level.height = json.value("height", 0);
+    level.background = json.value("background", "");
+    level.music = json.value("music", "");
+
+    if (json.contains("tiles")) {
+        for (const auto& tile_json : json.at("tiles")) {
+            level.tiles.push_back(parse_placed_tile(tile_json));
+        }
+    }
+
+    if (json.contains("collision")) {
+        level.collision = json.at("collision").get<std::vector<std::vector<int>>>();
+    } else {
+        level.collision = empty_collision_grid(level.width, level.height);
+    }
+
+    if (level.height == 0) {
+        level.height = static_cast<int>(level.collision.size());
+    }
+    if (level.width == 0 && !level.collision.empty()) {
+        level.width = static_cast<int>(level.collision.front().size());
+    }
+
+    for (const auto& row : level.collision) {
+        if (static_cast<int>(row.size()) != level.width) {
+            throw std::runtime_error("Collision rows have inconsistent width: " + path.string());
+        }
+    }
+
+    if (json.contains("objects")) {
+        for (const auto& object_json : json.at("objects")) {
+            level.objects.push_back(parse_object(object_json));
+        }
+    }
+
+    return level;
+}
+
 } // namespace
 
 LevelData load_level(const std::filesystem::path& path) {
@@ -43,37 +144,16 @@ LevelData load_level(const std::filesystem::path& path) {
     if (json.at("format").get<std::string>() != LevelData::kFormatId) {
         throw std::runtime_error("Unsupported level format in: " + path.string());
     }
-    if (json.at("version").get<int>() != LevelData::kVersion) {
-        throw std::runtime_error("Unsupported level version in: " + path.string());
+
+    const int version = json.at("version").get<int>();
+    if (version == 1) {
+        return load_level_v1(json, path);
+    }
+    if (version == LevelData::kVersion) {
+        return load_level_v2(json, path);
     }
 
-    LevelData level;
-    level.name = json.value("name", path.stem().string());
-    level.tile_size = json.value("tile_size", 32);
-    level.width = json.value("width", 0);
-    level.height = json.value("height", 0);
-    level.tiles = json.at("tiles").get<std::vector<std::vector<int>>>();
-
-    if (level.height == 0) {
-        level.height = static_cast<int>(level.tiles.size());
-    }
-    if (level.width == 0 && !level.tiles.empty()) {
-        level.width = static_cast<int>(level.tiles.front().size());
-    }
-
-    for (const auto& row : level.tiles) {
-        if (static_cast<int>(row.size()) != level.width) {
-            throw std::runtime_error("Level tile rows have inconsistent width: " + path.string());
-        }
-    }
-
-    if (json.contains("objects")) {
-        for (const auto& object_json : json.at("objects")) {
-            level.objects.push_back(parse_object(object_json));
-        }
-    }
-
-    return level;
+    throw std::runtime_error("Unsupported level version in: " + path.string());
 }
 
 } // namespace rivet::game::level

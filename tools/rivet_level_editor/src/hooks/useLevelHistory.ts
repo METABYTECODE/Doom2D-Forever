@@ -1,5 +1,5 @@
 import { useCallback, useReducer } from "react";
-import { ensureLevelTiles } from "../lib/level-tiles";
+import { ensureLevelCollision } from "../lib/level-collision";
 import type { LevelData } from "../types/level";
 
 const MAX_HISTORY = 60;
@@ -22,13 +22,13 @@ function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "replace":
       return {
-        level: ensureLevelTiles(action.level),
+        level: ensureLevelCollision(action.level),
         past: [],
         future: [],
         dirty: !action.clean,
       };
     case "update": {
-      const next = ensureLevelTiles(action.updater(state.level));
+      const next = ensureLevelCollision(action.updater(state.level));
       if (next === state.level) return state;
       return {
         level: next,

@@ -1,6 +1,8 @@
 #include <rivet/game/level_game.hpp>
 #include <rivet/game/level_scene.hpp>
 
+#include <string>
+
 #include <rivet/ecs/components/collider.hpp>
 #include <rivet/ecs/components/transform.hpp>
 #include <rivet/game/level/level_loader.hpp>
@@ -10,18 +12,20 @@ namespace rivet::game {
 
 namespace {
 
-constexpr int kSolidTile = 1;
 constexpr float kMoveSpeed = 280.0f;
 
 [[nodiscard]] LevelScene* active_level(rivet::core::GameContext& context) {
     return static_cast<LevelScene*>(context.scenes().active());
 }
 
-[[nodiscard]] rivet::render::Color tile_color(const int tile_id) {
-    if (tile_id == kSolidTile) {
-        return {.r = 70, .g = 78, .b = 96, .a = 255};
-    }
-    return {.r = 28, .g = 32, .b = 42, .a = 255};
+[[nodiscard]] rivet::render::Color placement_color(const std::string& tileset, const int tile_id) {
+    const std::size_t hash = std::hash<std::string>{}(tileset) ^ static_cast<std::size_t>(tile_id * 131);
+    return {
+        .r = static_cast<std::uint8_t>(60 + (hash % 120)),
+        .g = static_cast<std::uint8_t>(60 + ((hash / 7) % 120)),
+        .b = static_cast<std::uint8_t>(60 + ((hash / 49) % 120)),
+        .a = 255,
+    };
 }
 
 } // namespace
@@ -128,22 +132,32 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
         return;
     }
 
-    const float tile_size = static_cast<float>(scene->data().tile_size);
+    const float cell_size = static_cast<float>(scene->data().grid_size);
     for (int y = 0; y < scene->data().height; ++y) {
         for (int x = 0; x < scene->data().width; ++x) {
-            const int tile_id = scene->data().tiles[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)];
-            if (tile_id == 0) {
+            if (scene->data().collision[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] == 0) {
                 continue;
             }
             renderer.draw_filled_rect(
                 {
-                    .x = static_cast<float>(x) * tile_size,
-                    .y = static_cast<float>(y) * tile_size,
-                    .width = tile_size,
-                    .height = tile_size,
+                    .x = static_cast<float>(x) * cell_size,
+                    .y = static_cast<float>(y) * cell_size,
+                    .width = cell_size,
+                    .height = cell_size,
                 },
-                tile_color(tile_id));
+                {.r = 70, .g = 78, .b = 96, .a = 255});
         }
+    }
+
+    for (const auto& tile : scene->data().tiles) {
+        renderer.draw_filled_rect(
+            {
+                .x = static_cast<float>(tile.x) * cell_size,
+                .y = static_cast<float>(tile.y) * cell_size,
+                .width = cell_size,
+                .height = cell_size,
+            },
+            placement_color(tile.tileset, tile.id));
     }
 
     if (scene->player_entity() == rivet::ecs::kNullEntity) {

@@ -1,22 +1,31 @@
 import { useEffect, useRef, useState } from "react";
-import { hitObject } from "../lib/geometry";
-import type { EditorTool, LevelData } from "../types/level";
+import { worldCellSize } from "../lib/level-collision";
+import { hitObject, tileAt } from "../lib/geometry";
+import { tileCellSpan, tileIndexToAtlasCell } from "../lib/tile-math";
+import type {
+  CollisionTool,
+  EditorMode,
+  LevelData,
+  ObjectTool,
+  TileTool,
+} from "../types/level";
+import type { TilesetDef } from "../types/tileset";
 
 interface Props {
   level: LevelData;
-  tool: EditorTool;
+  mode: EditorMode;
+  tileTool: TileTool;
+  collisionTool: CollisionTool;
+  objectTool: ObjectTool;
+  tilesets: Map<string, TilesetDef>;
+  tilesetImages: Map<string, HTMLImageElement>;
   selectedObject: number;
+  selectedPlacement: number;
   mapRevision: number;
   onPointer: (worldX: number, worldY: number, button: number) => void;
   onObjectDrag: (index: number, worldX: number, worldY: number) => void;
+  onPlacementDrag: (index: number, cellX: number, cellY: number) => void;
 }
-
-const TILE_COLORS: Record<number, string> = {
-  0: "#1c202a",
-  1: "#464e60",
-  2: "#5a4038",
-  3: "#2f5a48",
-};
 
 const OBJECT_COLORS: Record<string, string> = {
   player: "#dc5a46",
@@ -25,54 +34,85 @@ const OBJECT_COLORS: Record<string, string> = {
 
 type DrawState = {
   camera: { x: number; y: number; zoom: number };
-  hover: { wx: number; wy: number; tx: number; ty: number } | null;
+  hover: { tx: number; ty: number } | null;
   level: LevelData;
+  mode: EditorMode;
+  tileTool: TileTool;
+  collisionTool: CollisionTool;
+  objectTool: ObjectTool;
+  tilesets: Map<string, TilesetDef>;
+  tilesetImages: Map<string, HTMLImageElement>;
   selectedObject: number;
-  tool: EditorTool;
+  selectedPlacement: number;
 };
 
 export function LevelCanvas({
   level,
-  tool,
+  mode,
+  tileTool,
+  collisionTool,
+  objectTool,
+  tilesets,
+  tilesetImages,
   selectedObject,
+  selectedPlacement,
   mapRevision,
   onPointer,
   onObjectDrag,
+  onPlacementDrag,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [camera, setCamera] = useState({ x: 0, y: 0, zoom: 1.5 });
-  const [hoverTile, setHoverTile] = useState<{ tx: number; ty: number } | null>(null);
+  const [camera, setCamera] = useState({ x: 320, y: 240, zoom: 2 });
 
   const paintingRef = useRef(false);
   const spaceRef = useRef(false);
   const panRef = useRef({ active: false, sx: 0, sy: 0, cx: 0, cy: 0 });
-  const dragRef = useRef<{ index: number; offsetX: number; offsetY: number } | null>(null);
+  const dragRef = useRef<
+    | { kind: "object"; index: number; offsetX: number; offsetY: number }
+    | { kind: "placement"; index: number; offsetX: number; offsetY: number }
+    | null
+  >(null);
+  const hoverRef = useRef<{ tx: number; ty: number } | null>(null);
   const cameraRef = useRef(camera);
   const drawStateRef = useRef<DrawState>({
     camera,
     hover: null,
     level,
+    mode,
+    tileTool,
+    collisionTool,
+    objectTool,
+    tilesets,
+    tilesetImages,
     selectedObject,
-    tool,
+    selectedPlacement,
   });
 
   cameraRef.current = camera;
   drawStateRef.current = {
     camera,
-    hover: hoverTile
-      ? { wx: 0, wy: 0, tx: hoverTile.tx, ty: hoverTile.ty }
-      : null,
+    hover: hoverRef.current,
     level,
+    mode,
+    tileTool,
+    collisionTool,
+    objectTool,
+    tilesets,
+    tilesetImages,
     selectedObject,
-    tool,
+    selectedPlacement,
   };
 
+  // Center camera only when loading a new map — not on every edit.
   useEffect(() => {
-    const worldW = level.width * level.tile_size;
-    const worldH = level.height * level.tile_size;
-    setCamera((c) => ({ ...c, x: worldW * 0.5, y: worldH * 0.5 }));
-  }, [mapRevision, level.tile_size, level.width, level.height]);
+    const cell = worldCellSize(level);
+    setCamera({
+      x: (level.width * cell) / 2,
+      y: (level.height * cell) / 2,
+      zoom: 2,
+    });
+  }, [mapRevision]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -87,6 +127,24 @@ export function LevelCanvas({
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const factor = e.deltaY < 0 ? 1.1 : 0.9;
+      setCamera((c) => ({
+        ...c,
+        zoom: Math.min(8, Math.max(0.25, c.zoom * factor)),
+      }));
+    };
+
+    container.addEventListener("wheel", onWheel, { passive: false });
+    return () => container.removeEventListener("wheel", onWheel);
   }, []);
 
   useEffect(() => {
@@ -113,14 +171,14 @@ export function LevelCanvas({
 
     let frame = 0;
     const draw = () => {
-      const { camera: cam, hover, level: lvl, selectedObject: selected, tool: activeTool } =
-        drawStateRef.current;
-
+      const state = drawStateRef.current;
+      const { camera: cam, hover, level: lvl } = state;
+      const cell = worldCellSize(lvl);
       const rect = container.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
 
-      ctx.fillStyle = "#12141c";
+      ctx.fillStyle = "#0c0e14";
       ctx.fillRect(0, 0, w, h);
 
       const toScreen = (wx: number, wy: number) => ({
@@ -128,28 +186,66 @@ export function LevelCanvas({
         y: h * 0.5 + (wy - cam.y) * cam.zoom,
       });
 
-      const ts = lvl.tile_size * cam.zoom;
-      const rowCount = Math.min(lvl.height, lvl.tiles.length);
+      const cellScreen = cell * cam.zoom;
 
-      for (let y = 0; y < rowCount; y++) {
-        const row = lvl.tiles[y];
-        if (!row) continue;
-        const colCount = Math.min(lvl.width, row.length);
-        for (let x = 0; x < colCount; x++) {
-          const tile = row[x] ?? 0;
-          const p = toScreen(x * lvl.tile_size, y * lvl.tile_size);
-          ctx.fillStyle = TILE_COLORS[tile] ?? "#333";
-          ctx.fillRect(p.x, p.y, ts, ts);
-          ctx.strokeStyle = "rgba(255,255,255,0.05)";
-          ctx.strokeRect(p.x, p.y, ts, ts);
+      for (let y = 0; y < lvl.height; y++) {
+        for (let x = 0; x < lvl.width; x++) {
+          const p = toScreen(x * cell, y * cell);
+          ctx.fillStyle = (x + y) % 2 === 0 ? "#151820" : "#12151c";
+          ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
         }
       }
 
+      for (let y = 0; y < lvl.height; y++) {
+        for (let x = 0; x < lvl.width; x++) {
+          if ((lvl.collision[y]?.[x] ?? 0) === 0) continue;
+          const p = toScreen(x * cell, y * cell);
+          ctx.fillStyle =
+            state.mode === "collision" ? "rgba(220, 80, 80, 0.45)" : "rgba(220, 80, 80, 0.15)";
+          ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
+        }
+      }
+
+      lvl.tiles.forEach((placement, index) => {
+        const ts = state.tilesets.get(placement.tileset);
+        const image = state.tilesetImages.get(placement.tileset);
+        const span = ts ? tileCellSpan(ts) : { w: 1, h: 1 };
+        const p = toScreen(placement.x * cell, placement.y * cell);
+        const pw = span.w * cell * cam.zoom;
+        const ph = span.h * cell * cam.zoom;
+
+        if (ts && image) {
+          const { col, row } = tileIndexToAtlasCell(placement.id, ts.columns);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(
+            image,
+            col * ts.tile_width,
+            row * ts.tile_height,
+            ts.tile_width,
+            ts.tile_height,
+            p.x,
+            p.y,
+            pw,
+            ph,
+          );
+        } else {
+          ctx.fillStyle = "#555";
+          ctx.fillRect(p.x, p.y, pw, ph);
+        }
+
+        if (index === state.selectedPlacement) {
+          ctx.strokeStyle = "#fff6a0";
+          ctx.lineWidth = 2;
+          ctx.strokeRect(p.x, p.y, pw, ph);
+        }
+      });
+
       if (hover) {
-        const hp = toScreen(hover.tx * lvl.tile_size, hover.ty * lvl.tile_size);
-        ctx.strokeStyle = "rgba(110,168,255,0.75)";
+        const hp = toScreen(hover.tx * cell, hover.ty * cell);
+        ctx.strokeStyle =
+          state.mode === "collision" ? "rgba(255,120,120,0.9)" : "rgba(110,168,255,0.85)";
         ctx.lineWidth = 2;
-        ctx.strokeRect(hp.x, hp.y, ts, ts);
+        ctx.strokeRect(hp.x, hp.y, cellScreen, cellScreen);
       }
 
       lvl.objects.forEach((object, index) => {
@@ -157,21 +253,22 @@ export function LevelCanvas({
         const ow = object.width * cam.zoom;
         const oh = object.height * cam.zoom;
         ctx.fillStyle = OBJECT_COLORS[object.type] ?? "#c8c850";
-        ctx.globalAlpha = index === selected ? 1 : 0.85;
+        ctx.globalAlpha = index === state.selectedObject ? 1 : 0.85;
         ctx.fillRect(p.x, p.y, ow, oh);
         ctx.globalAlpha = 1;
-        ctx.strokeStyle = index === selected ? "#fff6a0" : "rgba(255,255,255,0.35)";
-        ctx.lineWidth = index === selected ? 2 : 1;
+        ctx.strokeStyle = index === state.selectedObject ? "#fff6a0" : "rgba(255,255,255,0.35)";
+        ctx.lineWidth = index === state.selectedObject ? 2 : 1;
         ctx.strokeRect(p.x, p.y, ow, oh);
-        ctx.fillStyle = "#fff";
-        ctx.font = `600 ${Math.max(10, 11 * cam.zoom)}px Outfit, sans-serif`;
-        ctx.fillText(object.type, p.x + 4, p.y + 14 * cam.zoom);
       });
 
-      ctx.fillStyle = "rgba(255,255,255,0.55)";
-      ctx.font = "12px JetBrains Mono, monospace";
-      const hoverText = hover ? ` · tile ${hover.tx},${hover.ty}` : "";
-      ctx.fillText(`tool: ${activeTool} · zoom ${cam.zoom.toFixed(2)}${hoverText}`, 16, h - 16);
+      ctx.fillStyle = "rgba(200,210,230,0.7)";
+      ctx.font = "11px JetBrains Mono, monospace";
+      const hoverText = hover ? ` · ${hover.tx},${hover.ty}` : "";
+      ctx.fillText(
+        `${state.mode} · ${Math.round(cam.zoom * 100)}%${hoverText} · MMB/Space pan`,
+        12,
+        h - 10,
+      );
 
       frame = requestAnimationFrame(draw);
     };
@@ -198,37 +295,48 @@ export function LevelCanvas({
 
   const updateHover = (clientX: number, clientY: number) => {
     const world = screenToWorld(clientX, clientY);
-    const tx = Math.floor(world.x / level.tile_size);
-    const ty = Math.floor(world.y / level.tile_size);
-    setHoverTile((prev) => (prev?.tx === tx && prev?.ty === ty ? prev : { tx, ty }));
+    const cell = worldCellSize(level);
+    const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
+    const prev = hoverRef.current;
+    if (!prev || prev.tx !== tx || prev.ty !== ty) {
+      hoverRef.current = { tx, ty };
+      drawStateRef.current.hover = hoverRef.current;
+    }
   };
 
-  const strokeTool = tool === "paint" || tool === "erase";
+  const strokeActive =
+    (mode === "tiles" && (tileTool === "paint" || tileTool === "erase")) ||
+    (mode === "collision" && (collisionTool === "paint" || collisionTool === "erase"));
 
   return (
     <div
       ref={containerRef}
-      className="canvas-wrap"
+      className="canvas-viewport"
       onContextMenu={(e) => e.preventDefault()}
-      onWheel={(e) => {
-        e.preventDefault();
-        const factor = e.deltaY < 0 ? 1.08 : 0.92;
-        setCamera((c) => ({ ...c, zoom: Math.min(4, Math.max(0.35, c.zoom * factor)) }));
-      }}
       onPointerDown={(e) => {
+        e.preventDefault();
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         const world = screenToWorld(e.clientX, e.clientY);
+        const cell = worldCellSize(level);
+        const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
 
         if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
-          panRef.current = { active: true, sx: e.clientX, sy: e.clientY, cx: cameraRef.current.x, cy: cameraRef.current.y };
+          panRef.current = {
+            active: true,
+            sx: e.clientX,
+            sy: e.clientY,
+            cx: cameraRef.current.x,
+            cy: cameraRef.current.y,
+          };
           return;
         }
 
-        if (tool === "select" && e.button === 0) {
+        if (mode === "objects" && objectTool === "select" && e.button === 0) {
           const hit = hitObject(level.objects, world.x, world.y);
           if (hit >= 0) {
             const object = level.objects[hit];
             dragRef.current = {
+              kind: "object",
               index: hit,
               offsetX: world.x - object.x,
               offsetY: world.y - object.y,
@@ -238,13 +346,20 @@ export function LevelCanvas({
           }
         }
 
-        if (strokeTool && e.button === 0) {
+        if (mode === "tiles" && tileTool === "select" && e.button === 0) {
+          onPointer(world.x, world.y, e.button);
+          return;
+        }
+
+        if (strokeActive && e.button === 0) {
           paintingRef.current = true;
           onPointer(world.x, world.y, e.button);
           return;
         }
 
         onPointer(world.x, world.y, e.button);
+        void tx;
+        void ty;
       }}
       onPointerMove={(e) => {
         updateHover(e.clientX, e.clientY);
@@ -258,12 +373,23 @@ export function LevelCanvas({
         }
 
         const world = screenToWorld(e.clientX, e.clientY);
+        const cell = worldCellSize(level);
+        const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
 
-        if (dragRef.current) {
+        if (dragRef.current?.kind === "object") {
           onObjectDrag(
             dragRef.current.index,
             world.x - dragRef.current.offsetX,
             world.y - dragRef.current.offsetY,
+          );
+          return;
+        }
+
+        if (dragRef.current?.kind === "placement") {
+          onPlacementDrag(
+            dragRef.current.index,
+            tx - dragRef.current.offsetX,
+            ty - dragRef.current.offsetY,
           );
           return;
         }
@@ -285,7 +411,8 @@ export function LevelCanvas({
         paintingRef.current = false;
         panRef.current.active = false;
         dragRef.current = null;
-        setHoverTile(null);
+        hoverRef.current = null;
+        drawStateRef.current.hover = null;
       }}
     >
       <canvas ref={canvasRef} />

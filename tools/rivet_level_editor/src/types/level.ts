@@ -1,5 +1,6 @@
 export const LEVEL_FORMAT = "rivet-level" as const;
-export const LEVEL_VERSION = 1;
+export const LEVEL_VERSION = 2;
+export const GRID_SIZE = 8;
 
 export interface LevelObject {
   id: string;
@@ -12,15 +13,29 @@ export interface LevelObject {
   vel_y: number;
 }
 
+export interface PlacedTile {
+  tileset: string;
+  id: number;
+  x: number;
+  y: number;
+}
+
 export interface LevelData {
   format: typeof LEVEL_FORMAT;
   version: typeof LEVEL_VERSION;
   name: string;
-  tile_size: number;
+  grid_size: number;
   width: number;
   height: number;
-  tiles: number[][];
+  background: string;
+  music: string;
+  tiles: PlacedTile[];
+  collision: number[][];
   objects: LevelObject[];
 }
 
-export type EditorTool = "paint" | "erase" | "place-player" | "place-block" | "select";
+export type EditorMode = "tiles" | "collision" | "objects";
+
+export type TileTool = "paint" | "erase" | "select";
+export type CollisionTool = "paint" | "erase";
+export type ObjectTool = "place-player" | "place-block" | "select";

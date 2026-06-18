@@ -9,16 +9,14 @@ namespace rivet::game::level {
 
 namespace {
 
-constexpr int kSolidTile = 1;
-
-void spawn_tile_walls(rivet::ecs::World& world, const LevelData& level) {
+void spawn_collision(rivet::ecs::World& world, const LevelData& level) {
     using namespace rivet::ecs;
     using namespace rivet::ecs::components;
 
-    const float tile_size = static_cast<float>(level.tile_size);
+    const float cell_size = static_cast<float>(level.grid_size);
     for (int y = 0; y < level.height; ++y) {
         for (int x = 0; x < level.width; ++x) {
-            if (level.tiles[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] != kSolidTile) {
+            if (level.collision[static_cast<std::size_t>(y)][static_cast<std::size_t>(x)] == 0) {
                 continue;
             }
 
@@ -26,14 +24,14 @@ void spawn_tile_walls(rivet::ecs::World& world, const LevelData& level) {
             world.registry().emplace<Transform>(
                 entity,
                 Transform{
-                    .x = static_cast<float>(x) * tile_size,
-                    .y = static_cast<float>(y) * tile_size,
+                    .x = static_cast<float>(x) * cell_size,
+                    .y = static_cast<float>(y) * cell_size,
                 });
             world.registry().emplace<Collider>(
                 entity,
                 Collider{
-                    .width = tile_size,
-                    .height = tile_size,
+                    .width = cell_size,
+                    .height = cell_size,
                     .is_static = true,
                 });
         }
@@ -78,10 +76,10 @@ void spawn_object(rivet::ecs::World& world, const LevelObject& object, rivet::ec
 
 LevelSpawnResult spawn_level(rivet::ecs::World& world, const LevelData& level) {
     LevelSpawnResult result;
-    result.world_width = static_cast<float>(level.width * level.tile_size);
-    result.world_height = static_cast<float>(level.height * level.tile_size);
+    result.world_width = static_cast<float>(level.width * level.grid_size);
+    result.world_height = static_cast<float>(level.height * level.grid_size);
 
-    spawn_tile_walls(world, level);
+    spawn_collision(world, level);
 
     for (const auto& object : level.objects) {
         spawn_object(world, object, result.player);

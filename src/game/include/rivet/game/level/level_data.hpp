@@ -18,15 +18,26 @@ struct LevelObject {
     float vel_y = 0.0f;
 };
 
+/// Graphics tile instance. Origin is in level grid cells (see grid_size).
+struct PlacedTile {
+    std::string tileset;
+    int id = 0;
+    int x = 0;
+    int y = 0;
+};
+
 struct LevelData {
     static constexpr const char* kFormatId = "rivet-level";
-    static constexpr int kVersion = 1;
+    static constexpr int kVersion = 2;
 
     std::string name;
-    int tile_size = 32;
+    int grid_size = 8;
     int width = 0;
     int height = 0;
-    std::vector<std::vector<int>> tiles;
+    std::string background;
+    std::string music;
+    std::vector<PlacedTile> tiles;
+    std::vector<std::vector<int>> collision;
     std::vector<LevelObject> objects;
 };
 

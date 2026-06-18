@@ -6,20 +6,25 @@ export function validateLevel(level: LevelData): string[] {
   if (level.format !== LEVEL_FORMAT) errors.push("Invalid format id");
   if (level.version !== LEVEL_VERSION) errors.push("Unsupported version");
   if (!level.name.trim()) errors.push("Level name is empty");
-  if (level.tile_size < 8) errors.push("Tile size must be at least 8");
+  if (level.grid_size < 1) errors.push("grid_size must be positive");
   if (level.width < 1 || level.height < 1) errors.push("Map size must be positive");
-  if (level.tiles.length !== level.height) {
-    errors.push(`Tile rows (${level.tiles.length}) != height (${level.height})`);
+  if (level.collision.length !== level.height) {
+    errors.push(`Collision rows (${level.collision.length}) != height (${level.height})`);
   }
-  for (let y = 0; y < level.tiles.length; y++) {
-    if (level.tiles[y].length !== level.width) {
-      errors.push(`Row ${y} width mismatch`);
+  for (let y = 0; y < level.collision.length; y++) {
+    if (level.collision[y].length !== level.width) {
+      errors.push(`Collision row ${y} width mismatch`);
       break;
     }
   }
 
   const players = level.objects.filter((o) => o.type === "player");
   if (players.length > 1) errors.push("More than one player object");
+
+  for (const tile of level.tiles) {
+    if (!tile.tileset.trim()) errors.push("Placed tile with empty tileset id");
+    if (tile.x < 0 || tile.y < 0) errors.push("Placed tile with negative coordinates");
+  }
 
   for (const object of level.objects) {
     if (!object.type.trim()) errors.push("Object with empty type");

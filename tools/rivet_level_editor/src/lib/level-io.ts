@@ -1,63 +1,39 @@
 import {
+  GRID_SIZE,
   LEVEL_FORMAT,
   LEVEL_VERSION,
   type LevelData,
   type LevelObject,
+  type PlacedTile,
 } from "../types/level";
-import { ensureLevelTiles } from "./level-tiles";
+import { ensureLevelCollision, emptyCollision, paintCollisionBorder } from "./level-collision";
 
-export { ensureLevelTiles, resizeLevel as resizeTiles } from "./level-tiles";
+export { ensureLevelCollision, resizeLevel } from "./level-collision";
 
-export function createBlankLevel(width = 20, height = 15, tileSize = 32): LevelData {
-  const tiles = Array.from({ length: height }, () => Array<number>(width).fill(0));
-  for (let x = 0; x < width; x++) {
-    tiles[0][x] = 1;
-    tiles[height - 1][x] = 1;
-  }
-  for (let y = 1; y < height - 1; y++) {
-    tiles[y][0] = 1;
-    tiles[y][width - 1] = 1;
-  }
-
-  return ensureLevelTiles({
+export function createBlankLevel(width = 80, height = 60): LevelData {
+  const level: LevelData = {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: "untitled",
-    tile_size: tileSize,
+    grid_size: GRID_SIZE,
     width,
     height,
-    tiles,
+    background: "",
+    music: "",
+    tiles: [],
+    collision: emptyCollision(width, height),
     objects: [],
-  });
+  };
+  return paintCollisionBorder(level);
 }
 
-export function parseLevelJson(text: string): LevelData {
-  const raw = JSON.parse(text) as Record<string, unknown>;
-  if (raw.format !== LEVEL_FORMAT) {
-    throw new Error(`Unsupported format: ${String(raw.format)}`);
-  }
-  if (raw.version !== LEVEL_VERSION) {
-    throw new Error(`Unsupported version: ${String(raw.version)}`);
-  }
-
-  const tiles = raw.tiles as number[][];
-  const width = Number(raw.width ?? tiles[0]?.length ?? 0);
-  const height = Number(raw.height ?? tiles.length ?? 0);
-
-  const objects = Array.isArray(raw.objects)
-    ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
-    : [];
-
-  return ensureLevelTiles({
-    format: LEVEL_FORMAT,
-    version: LEVEL_VERSION,
-    name: String(raw.name ?? "level"),
-    tile_size: Number(raw.tile_size ?? 32),
-    width,
-    height,
-    tiles,
-    objects,
-  });
+function parsePlacedTile(raw: Record<string, unknown>): PlacedTile {
+  return {
+    tileset: String(raw.tileset),
+    id: Number(raw.id),
+    x: Number(raw.x),
+    y: Number(raw.y),
+  };
 }
 
 function parseObject(raw: Record<string, unknown>, index: number): LevelObject {
@@ -71,6 +47,94 @@ function parseObject(raw: Record<string, unknown>, index: number): LevelObject {
     vel_x: Number(raw.vx ?? raw.vel_x ?? 0),
     vel_y: Number(raw.vy ?? raw.vel_y ?? 0),
   };
+}
+
+function convertLegacyLevel(raw: Record<string, unknown>): LevelData {
+  const legacyTileSize = Number(raw.tile_size ?? 32);
+  const scale = legacyTileSize / GRID_SIZE;
+  if (!Number.isInteger(scale) || scale < 1) {
+    throw new Error("Legacy tile_size must be a multiple of 8");
+  }
+
+  const legacyTiles = raw.tiles as number[][];
+  const legacyWidth = Number(raw.width ?? legacyTiles[0]?.length ?? 0);
+  const legacyHeight = Number(raw.height ?? legacyTiles.length ?? 0);
+  const width = legacyWidth * scale;
+  const height = legacyHeight * scale;
+  const collision = emptyCollision(width, height);
+
+  for (let y = 0; y < legacyHeight; y++) {
+    for (let x = 0; x < legacyWidth; x++) {
+      if ((legacyTiles[y]?.[x] ?? 0) !== 1) continue;
+      for (let dy = 0; dy < scale; dy++) {
+        for (let dx = 0; dx < scale; dx++) {
+          collision[y * scale + dy][x * scale + dx] = 1;
+        }
+      }
+    }
+  }
+
+  const objects = Array.isArray(raw.objects)
+    ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
+    : [];
+
+  return ensureLevelCollision({
+    format: LEVEL_FORMAT,
+    version: LEVEL_VERSION,
+    name: String(raw.name ?? "level"),
+    grid_size: GRID_SIZE,
+    width,
+    height,
+    background: "",
+    music: "",
+    tiles: [],
+    collision,
+    objects,
+  });
+}
+
+export function parseLevelJson(text: string): LevelData {
+  const raw = JSON.parse(text) as Record<string, unknown>;
+  if (raw.format !== LEVEL_FORMAT) {
+    throw new Error(`Unsupported format: ${String(raw.format)}`);
+  }
+
+  const version = Number(raw.version);
+  if (version === 1) {
+    return convertLegacyLevel(raw);
+  }
+  if (version !== LEVEL_VERSION) {
+    throw new Error(`Unsupported version: ${String(raw.version)}`);
+  }
+
+  const width = Number(raw.width ?? 0);
+  const height = Number(raw.height ?? 0);
+
+  const tiles = Array.isArray(raw.tiles)
+    ? raw.tiles.map((item) => parsePlacedTile(item as Record<string, unknown>))
+    : [];
+
+  const collision = Array.isArray(raw.collision)
+    ? (raw.collision as number[][])
+    : emptyCollision(width, height);
+
+  const objects = Array.isArray(raw.objects)
+    ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
+    : [];
+
+  return ensureLevelCollision({
+    format: LEVEL_FORMAT,
+    version: LEVEL_VERSION,
+    name: String(raw.name ?? "level"),
+    grid_size: Number(raw.grid_size ?? GRID_SIZE),
+    width,
+    height,
+    background: String(raw.background ?? ""),
+    music: String(raw.music ?? ""),
+    tiles,
+    collision,
+    objects,
+  });
 }
 
 function objectToJson(object: LevelObject): Record<string, unknown> {
@@ -88,17 +152,20 @@ function objectToJson(object: LevelObject): Record<string, unknown> {
 }
 
 export function serializeLevel(level: LevelData): string {
-  const normalized = ensureLevelTiles(level);
-  const json = {
+  const normalized = ensureLevelCollision(level);
+  const json: Record<string, unknown> = {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: normalized.name,
-    tile_size: normalized.tile_size,
+    grid_size: normalized.grid_size,
     width: normalized.width,
     height: normalized.height,
     tiles: normalized.tiles,
+    collision: normalized.collision,
     objects: normalized.objects.map(objectToJson),
   };
+  if (normalized.background) json.background = normalized.background;
+  if (normalized.music) json.music = normalized.music;
   return `${JSON.stringify(json, null, 2)}\n`;
 }
 
