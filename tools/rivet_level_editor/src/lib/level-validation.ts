@@ -24,6 +24,15 @@ export function validateLevel(level: LevelData): string[] {
   for (const tile of level.tiles) {
     if (!tile.tileset.trim()) errors.push("Placed tile with empty tileset id");
     if (tile.x < 0 || tile.y < 0) errors.push("Placed tile with negative coordinates");
+    if (tile.frames) {
+      for (const frame of tile.frames) {
+        if (!frame.tileset.trim()) errors.push("Animated tile frame with empty tileset id");
+      }
+      if (tile.frames.length === 1) errors.push("Animated tile has only one frame");
+    }
+    if (tile.frame_ms != null && tile.frame_ms <= 0) {
+      errors.push("frame_ms must be positive");
+    }
   }
 
   for (const object of level.objects) {

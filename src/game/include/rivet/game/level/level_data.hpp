@@ -18,13 +18,39 @@ struct LevelObject {
     float vel_y = 0.0f;
 };
 
+struct TileFrame {
+    std::string tileset;
+    int id = 0;
+};
+
 /// Graphics tile instance. Origin is in level grid cells (see grid_size).
 struct PlacedTile {
     std::string tileset;
     int id = 0;
     int x = 0;
     int y = 0;
+    std::vector<TileFrame> frames;
+    int frame_ms = 120;
 };
+
+[[nodiscard]] inline bool is_animated_tile(const PlacedTile& tile) {
+    return tile.frames.size() > 1;
+}
+
+[[nodiscard]] inline TileFrame tile_frame_at_time(const PlacedTile& tile, const float time_seconds) {
+    if (tile.frames.size() <= 1) {
+        if (tile.frames.empty()) {
+            return TileFrame{.tileset = tile.tileset, .id = tile.id};
+        }
+        return tile.frames.front();
+    }
+
+    const int frame_ms = tile.frame_ms > 0 ? tile.frame_ms : 120;
+    const auto elapsed_ms = static_cast<std::int64_t>(time_seconds * 1000.0f);
+    const auto index = static_cast<std::size_t>(
+        (elapsed_ms / frame_ms) % static_cast<std::int64_t>(tile.frames.size()));
+    return tile.frames[index];
+}
 
 struct LevelData {
     static constexpr const char* kFormatId = "rivet-level";

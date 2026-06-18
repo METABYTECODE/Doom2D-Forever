@@ -31,12 +31,27 @@ namespace {
     return object;
 }
 
+[[nodiscard]] TileFrame parse_tile_frame(const nlohmann::json& json) {
+    return {
+        .tileset = json.at("tileset").get<std::string>(),
+        .id = json.at("id").get<int>(),
+    };
+}
+
 [[nodiscard]] PlacedTile parse_placed_tile(const nlohmann::json& json) {
     PlacedTile tile;
     tile.tileset = json.at("tileset").get<std::string>();
     tile.id = json.at("id").get<int>();
     tile.x = json.at("x").get<int>();
     tile.y = json.at("y").get<int>();
+    if (json.contains("frames")) {
+        for (const auto& frame_json : json.at("frames")) {
+            tile.frames.push_back(parse_tile_frame(frame_json));
+        }
+    }
+    if (json.contains("frame_ms")) {
+        tile.frame_ms = json.at("frame_ms").get<int>();
+    }
     return tile;
 }
 

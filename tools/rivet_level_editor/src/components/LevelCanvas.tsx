@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { animatedTileFrame } from "../lib/tile-animation";
 import { worldCellSize } from "../lib/level-collision";
 import { hitObject, tileAt } from "../lib/geometry";
 import { tileCellSpan, tileIndexToAtlasCell } from "../lib/tile-math";
@@ -85,6 +86,7 @@ export function LevelCanvas({
     | null
   >(null);
   const hoverRef = useRef<{ tx: number; ty: number } | null>(null);
+  const animationStartRef = useRef(performance.now());
   const cameraRef = useRef(camera);
   const drawStateRef = useRef<DrawState>({
     camera,
@@ -198,6 +200,7 @@ export function LevelCanvas({
       });
 
       const cellScreen = cell * cam.zoom;
+      const elapsedMs = performance.now() - animationStartRef.current;
 
     for (let y = 0; y < lvl.height; y++) {
         for (let x = 0; x < lvl.width; x++) {
@@ -208,15 +211,17 @@ export function LevelCanvas({
       }
 
       lvl.tiles.forEach((placement, index) => {
-        const ts = state.tilesets.get(placement.tileset);
-        const image = state.tilesetImages.get(placement.tileset);
-        const span = ts ? tileCellSpan(ts) : { w: 1, h: 1 };
+        const frame = animatedTileFrame(placement, elapsedMs);
+        const ts = state.tilesets.get(frame.tileset);
+        const image = state.tilesetImages.get(frame.tileset);
+        const footprintTs = ts ?? state.tilesets.get(placement.tileset);
+        const span = footprintTs ? tileCellSpan(footprintTs) : { w: 1, h: 1 };
         const p = toScreen(placement.x * cell, placement.y * cell);
         const pw = span.w * cell * cam.zoom;
         const ph = span.h * cell * cam.zoom;
 
         if (ts && image) {
-          const { col, row } = tileIndexToAtlasCell(placement.id, ts.columns);
+          const { col, row } = tileIndexToAtlasCell(frame.id, ts.columns);
           ctx.imageSmoothingEnabled = false;
           ctx.drawImage(
             image,

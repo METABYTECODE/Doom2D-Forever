@@ -1,10 +1,12 @@
 import {
+  DEFAULT_FRAME_MS,
   GRID_SIZE,
   LEVEL_FORMAT,
   LEVEL_VERSION,
   type LevelData,
   type LevelObject,
   type PlacedTile,
+  type TileFrame,
 } from "../types/level";
 import { ensureLevelCollision, emptyCollision, paintCollisionBorder } from "./level-collision";
 
@@ -27,13 +29,27 @@ export function createBlankLevel(width = 80, height = 60): LevelData {
   return paintCollisionBorder(level);
 }
 
-function parsePlacedTile(raw: Record<string, unknown>): PlacedTile {
+function parseTileFrame(raw: Record<string, unknown>): TileFrame {
   return {
+    tileset: String(raw.tileset),
+    id: Number(raw.id),
+  };
+}
+
+function parsePlacedTile(raw: Record<string, unknown>): PlacedTile {
+  const tile: PlacedTile = {
     tileset: String(raw.tileset),
     id: Number(raw.id),
     x: Number(raw.x),
     y: Number(raw.y),
   };
+  if (Array.isArray(raw.frames)) {
+    tile.frames = raw.frames.map((frame) => parseTileFrame(frame as Record<string, unknown>));
+  }
+  if (raw.frame_ms != null) {
+    tile.frame_ms = Number(raw.frame_ms);
+  }
+  return tile;
 }
 
 function parseObject(raw: Record<string, unknown>, index: number): LevelObject {
@@ -151,6 +167,20 @@ function objectToJson(object: LevelObject): Record<string, unknown> {
   return json;
 }
 
+function placedTileToJson(tile: PlacedTile): Record<string, unknown> {
+  const json: Record<string, unknown> = {
+    tileset: tile.tileset,
+    id: tile.id,
+    x: tile.x,
+    y: tile.y,
+  };
+  if (tile.frames && tile.frames.length > 1) {
+    json.frames = tile.frames;
+    json.frame_ms = tile.frame_ms ?? DEFAULT_FRAME_MS;
+  }
+  return json;
+}
+
 export function serializeLevel(level: LevelData): string {
   const normalized = ensureLevelCollision(level);
   const json: Record<string, unknown> = {
@@ -160,7 +190,7 @@ export function serializeLevel(level: LevelData): string {
     grid_size: normalized.grid_size,
     width: normalized.width,
     height: normalized.height,
-    tiles: normalized.tiles,
+    tiles: normalized.tiles.map(placedTileToJson),
     collision: normalized.collision,
     objects: normalized.objects.map(objectToJson),
   };

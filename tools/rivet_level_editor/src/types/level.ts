@@ -13,12 +13,23 @@ export interface LevelObject {
   vel_y: number;
 }
 
+export interface TileFrame {
+  tileset: string;
+  id: number;
+}
+
 export interface PlacedTile {
   tileset: string;
   id: number;
   x: number;
   y: number;
+  /** Animation frames. Frame #0 is always the primary `id` when editing. */
+  frames?: TileFrame[];
+  /** Milliseconds per animation frame. */
+  frame_ms?: number;
 }
+
+export const DEFAULT_FRAME_MS = 120;
 
 export interface LevelData {
   format: typeof LEVEL_FORMAT;

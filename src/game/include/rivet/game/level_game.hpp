@@ -27,7 +27,7 @@ private:
         rivet::core::GameContext& context,
         float player_center_x,
         float player_center_y) const;
-    void draw_level_tiles(rivet::render::IRenderer& renderer, const level::LevelData& data);
+    void draw_level_tiles(rivet::render::IRenderer& renderer, const level::LevelData& data, float animation_time);
 
     std::filesystem::path level_path_;
     level::LevelData level_;
@@ -35,6 +35,7 @@ private:
     rivet::resources::TextureHandle player_texture_ = rivet::resources::kInvalidTexture;
     std::unique_ptr<tileset::TilesetCatalog> tilesets_;
     std::filesystem::path assets_root_;
+    float animation_time_ = 0.0f;
 
     struct PlayerMotion {
         float prev_x = 0.0f;

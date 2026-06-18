@@ -178,6 +178,8 @@ void LevelGame::on_update(rivet::core::GameContext& context, float delta_time) {
         context.request_quit();
     }
 
+    animation_time_ += delta_time;
+
     if (context.input().is_key_pressed(rivet::input::Key::Space)) {
         jump_buffer_time_ = kJumpBufferTime;
     }
@@ -233,13 +235,21 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
     }
 }
 
-void LevelGame::draw_level_tiles(rivet::render::IRenderer& renderer, const level::LevelData& data) {
+void LevelGame::draw_level_tiles(
+    rivet::render::IRenderer& renderer,
+    const level::LevelData& data,
+    const float animation_time) {
     const float cell_size = static_cast<float>(data.grid_size);
 
     for (const auto& tile : data.tiles) {
-        const tileset::TilesetDef* def = tilesets_ ? tilesets_->find(tile.tileset) : nullptr;
-        const int footprint_w = def ? std::max(1, def->tile_width / data.grid_size) : 1;
-        const int footprint_h = def ? std::max(1, def->tile_height / data.grid_size) : 1;
+        const auto frame = level::tile_frame_at_time(tile, animation_time);
+        const tileset::TilesetDef* def = tilesets_ ? tilesets_->find(frame.tileset) : nullptr;
+        const tileset::TilesetDef* footprint_def =
+            def != nullptr ? def : (tilesets_ ? tilesets_->find(tile.tileset) : nullptr);
+        const int footprint_w =
+            footprint_def ? std::max(1, footprint_def->tile_width / data.grid_size) : 1;
+        const int footprint_h =
+            footprint_def ? std::max(1, footprint_def->tile_height / data.grid_size) : 1;
 
         const rivet::render::Rect dest{
             .x = static_cast<float>(tile.x) * cell_size,
@@ -252,11 +262,11 @@ void LevelGame::draw_level_tiles(rivet::render::IRenderer& renderer, const level
             renderer.draw_texture(
                 def->texture,
                 dest,
-                tileset::tile_source_rect(*def, tile.id));
+                tileset::tile_source_rect(*def, frame.id));
             continue;
         }
 
-        renderer.draw_filled_rect(dest, fallback_tile_color(tile.tileset, tile.id));
+        renderer.draw_filled_rect(dest, fallback_tile_color(frame.tileset, frame.id));
     }
 }
 
@@ -289,7 +299,7 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
             render_x + collider.width * 0.5f,
             render_y + collider.height * 0.5f);
 
-        draw_level_tiles(renderer, data);
+        draw_level_tiles(renderer, data, animation_time_);
 
         if (player_texture_ != rivet::resources::kInvalidTexture) {
             renderer.draw_texture(
@@ -303,7 +313,7 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
         return;
     }
 
-    draw_level_tiles(renderer, data);
+    draw_level_tiles(renderer, data, animation_time_);
 }
 
 } // namespace rivet::game

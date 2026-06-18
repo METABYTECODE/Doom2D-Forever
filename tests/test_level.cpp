@@ -76,7 +76,19 @@ TEST_CASE("Level saver round-trips rivet-level v2 JSON", "[game][level]") {
     original.collision = std::vector<std::vector<int>>(8, std::vector<int>(10, 0));
     original.collision[0][0] = 1;
     original.collision[1][1] = 1;
-    original.tiles.push_back({"terrain", 2, 3, 4});
+    original.tiles.push_back({
+        .tileset = "terrain",
+        .id = 2,
+        .x = 3,
+        .y = 4,
+        .frames =
+            {
+                {.tileset = "terrain", .id = 2},
+                {.tileset = "terrain", .id = 3},
+                {.tileset = "terrain", .id = 4},
+            },
+        .frame_ms = 150,
+    });
     original.objects.push_back(
         {.id = "player", .type = "player", .x = 32.0f, .y = 48.0f, .width = 40.0f, .height = 40.0f});
 
@@ -92,6 +104,9 @@ TEST_CASE("Level saver round-trips rivet-level v2 JSON", "[game][level]") {
     REQUIRE(reloaded.tiles.size() == 1);
     CHECK(reloaded.tiles.front().tileset == "terrain");
     CHECK(reloaded.tiles.front().id == 2);
+    REQUIRE(reloaded.tiles.front().frames.size() == 3);
+    CHECK(reloaded.tiles.front().frames[1].id == 3);
+    CHECK(reloaded.tiles.front().frame_ms == 150);
     REQUIRE(reloaded.objects.size() == 1);
     CHECK(reloaded.objects.front().type == "player");
 

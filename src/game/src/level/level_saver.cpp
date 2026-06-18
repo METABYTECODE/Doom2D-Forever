@@ -35,12 +35,21 @@ namespace {
 }
 
 [[nodiscard]] nlohmann::json placed_tile_to_json(const PlacedTile& tile) {
-    return {
+    nlohmann::json json = {
         {"tileset", tile.tileset},
         {"id", tile.id},
         {"x", tile.x},
         {"y", tile.y},
     };
+    if (tile.frames.size() > 1) {
+        nlohmann::json frames = nlohmann::json::array();
+        for (const auto& frame : tile.frames) {
+            frames.push_back({{"tileset", frame.tileset}, {"id", frame.id}});
+        }
+        json["frames"] = std::move(frames);
+        json["frame_ms"] = tile.frame_ms;
+    }
+    return json;
 }
 
 } // namespace

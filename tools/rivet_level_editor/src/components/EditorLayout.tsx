@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { DEFAULT_FRAME_MS, type PlacedTile } from "../types/level";
 import type {
   CollisionTool,
   EditorMode,
@@ -7,7 +8,9 @@ import type {
   ObjectTool,
   TileTool,
 } from "../types/level";
+import { isAnimatedPlacement, placementFrames as getPlacementFrames } from "../lib/tile-animation";
 import type { TilesetDef } from "../types/tileset";
+import { TilePreview } from "./TilePreview";
 
 interface MenuProps {
   dirty: boolean;
@@ -173,47 +176,6 @@ interface TilesetDockProps {
   onOpenPicker: () => void;
 }
 
-function TilePreview({
-  tileset,
-  image,
-  tileId,
-}: {
-  tileset: TilesetDef | null;
-  image: HTMLImageElement | null;
-  tileId: number;
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !tileset || !image) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const size = 48;
-    canvas.width = size;
-    canvas.height = size;
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, size, size);
-
-    const col = tileId % tileset.columns;
-    const row = Math.floor(tileId / tileset.columns);
-    ctx.drawImage(
-      image,
-      col * tileset.tile_width,
-      row * tileset.tile_height,
-      tileset.tile_width,
-      tileset.tile_height,
-      0,
-      0,
-      size,
-      size,
-    );
-  }, [image, tileId, tileset]);
-
-  return <canvas ref={canvasRef} className="tile-preview-canvas" width={48} height={48} />;
-}
-
 export function TilesetDock({
   tilesets,
   tilesetImages,
@@ -250,12 +212,16 @@ interface InspectorProps {
   mode: EditorMode;
   selected: LevelObject | null;
   selectedPlacement: number;
+  tilesets: Map<string, TilesetDef>;
+  tilesetImages: Map<string, HTMLImageElement>;
   snapGrid: boolean;
   onLevelPatch: (patch: Partial<LevelData>) => void;
   onResizeMap: (w: number, h: number) => void;
   onObjectPatch: (patch: Partial<LevelObject>) => void;
+  onUpdatePlacement: (index: number, patch: Partial<PlacedTile>) => void;
   onDeleteObject: () => void;
   onDeletePlacement: () => void;
+  onAddFrame: () => void;
   onSnapGridChange: (v: boolean) => void;
 }
 
@@ -264,12 +230,16 @@ export function Inspector({
   mode,
   selected,
   selectedPlacement,
+  tilesets,
+  tilesetImages,
   snapGrid,
   onLevelPatch,
   onResizeMap,
   onObjectPatch,
+  onUpdatePlacement,
   onDeleteObject,
   onDeletePlacement,
+  onAddFrame,
   onSnapGridChange,
 }: InspectorProps) {
   const [draftW, setDraftW] = useState(level.width);
@@ -281,6 +251,7 @@ export function Inspector({
   }, [level.width, level.height]);
 
   const placement = selectedPlacement >= 0 ? level.tiles[selectedPlacement] : null;
+  const frames = placement ? getPlacementFrames(placement) : [];
 
   return (
     <aside className="inspector">
@@ -349,6 +320,73 @@ export function Inspector({
           <p className="mono">
             {placement.tileset}:{placement.id} @ {placement.x},{placement.y}
           </p>
+
+          <div className="frame-list-header">
+            <h4>Animation frames</h4>
+            <button type="button" className="accent-btn" onClick={onAddFrame}>
+              + Add frame
+            </button>
+          </div>
+
+          {isAnimatedPlacement(placement) && (
+            <label>
+              Frame duration (ms)
+              <input
+                type="number"
+                min={40}
+                max={2000}
+                step={10}
+                value={placement.frame_ms ?? DEFAULT_FRAME_MS}
+                onChange={(e) =>
+                  onUpdatePlacement(selectedPlacement, {
+                    frame_ms: Number(e.target.value),
+                  })
+                }
+              />
+            </label>
+          )}
+
+          <ul className="frame-list">
+            {frames.map((frame, index) => {
+              const frameTileset = tilesets.get(frame.tileset) ?? null;
+              const frameImage = tilesetImages.get(frame.tileset) ?? null;
+              return (
+                <li key={`${index}-${frame.tileset}-${frame.id}`} className="frame-list-item">
+                  <TilePreview
+                    tileset={frameTileset}
+                    image={frameImage}
+                    tileId={frame.id}
+                    size={36}
+                    className="frame-preview-canvas"
+                  />
+                  <div className="frame-list-meta">
+                    <span className="mono">
+                      #{index} {frame.tileset}:{frame.id}
+                    </span>
+                    {index === 0 && <span className="hint">primary</span>}
+                  </div>
+                  {index > 0 && (
+                    <button
+                      type="button"
+                      className="frame-remove-btn"
+                      title="Remove frame"
+                      onClick={() => {
+                        const nextFrames = frames.filter((_, i) => i !== index);
+                        onUpdatePlacement(selectedPlacement, {
+                          frames: nextFrames.length > 1 ? nextFrames : undefined,
+                          frame_ms:
+                            nextFrames.length > 1 ? (placement.frame_ms ?? DEFAULT_FRAME_MS) : undefined,
+                        });
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
           <button type="button" className="danger-btn" onClick={onDeletePlacement}>
             Delete tile
           </button>

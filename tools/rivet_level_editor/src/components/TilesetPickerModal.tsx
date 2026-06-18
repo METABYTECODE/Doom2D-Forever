@@ -7,8 +7,14 @@ interface Props {
   tileset: TilesetDef | null;
   image: HTMLImageElement | null;
   selectedTileId: number;
-  onSelect: (tileId: number) => void;
+  onSelect?: (tileId: number) => void;
+  onSelectFrame?: (tilesetId: string, tileId: number) => void;
   onClose: () => void;
+  title?: string;
+  tilesets?: Map<string, TilesetDef>;
+  tilesetImages?: Map<string, HTMLImageElement>;
+  activeTilesetId?: string;
+  onTilesetChange?: (id: string) => void;
 }
 
 export function TilesetPickerModal({
@@ -17,7 +23,13 @@ export function TilesetPickerModal({
   image,
   selectedTileId,
   onSelect,
+  onSelectFrame,
   onClose,
+  title = "Pick tile",
+  tilesets,
+  tilesetImages,
+  activeTilesetId,
+  onTilesetChange,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -97,7 +109,12 @@ export function TilesetPickerModal({
     const row = Math.floor(py / cellH);
     if (col < 0 || row < 0 || col >= tileset.columns) return;
 
-    onSelect(atlasCellToTileIndex(col, row, tileset.columns));
+    const tileId = atlasCellToTileIndex(col, row, tileset.columns);
+    if (onSelectFrame) {
+      onSelectFrame(activeTilesetId ?? tileset.id, tileId);
+    } else {
+      onSelect?.(tileId);
+    }
     onClose();
   };
 
@@ -112,18 +129,32 @@ export function TilesetPickerModal({
         onPointerDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Pick tile"
+        aria-label={title}
       >
         <header className="tileset-modal-header">
           <div>
-            <strong>{tileset.name}</strong>
-            <span className="muted">
-              {" "}
-              · {tileset.tile_width}×{tileset.tile_height} · tile #{selectedTileId} (col {col}, row{" "}
-              {row})
-            </span>
+            <strong>{title}</strong>
+            {tileset && (
+              <span className="muted">
+                {" "}
+                · {tileset.name} · {tileset.tile_width}×{tileset.tile_height} · tile #{selectedTileId}{" "}
+                (col {col}, row {row})
+              </span>
+            )}
           </div>
           <div className="tileset-modal-actions">
+            {tilesets && onTilesetChange && (
+              <select
+                value={activeTilesetId ?? tileset?.id ?? ""}
+                onChange={(e) => onTilesetChange(e.target.value)}
+              >
+                {[...tilesets.values()].map((ts) => (
+                  <option key={ts.id} value={ts.id}>
+                    {ts.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <button type="button" onClick={() => setZoom((z) => Math.max(2, z - 1))}>
               −
             </button>

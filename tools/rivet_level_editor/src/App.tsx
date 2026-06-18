@@ -26,8 +26,10 @@ import type {
   EditorMode,
   LevelObject,
   ObjectTool,
+  PlacedTile,
   TileTool,
 } from "./types/level";
+import { DEFAULT_FRAME_MS } from "./types/level";
 import type { TilesetDef } from "./types/tileset";
 
 export function App() {
@@ -48,6 +50,8 @@ export function App() {
   const [status, setStatus] = useState("Loading…");
   const [mapRevision, setMapRevision] = useState(0);
   const [tilePickerOpen, setTilePickerOpen] = useState(false);
+  const [framePickerOpen, setFramePickerOpen] = useState(false);
+  const [framePickerTilesetId, setFramePickerTilesetId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -106,6 +110,49 @@ export function App() {
     setSelectedObject(-1);
     setStatus("Object deleted");
   }, [selectedObject, update]);
+
+  const updatePlacement = useCallback(
+    (index: number, patch: Partial<PlacedTile>) => {
+      update((prev) => ({
+        ...prev,
+        tiles: prev.tiles.map((tile, i) => (i === index ? { ...tile, ...patch } : tile)),
+      }));
+    },
+    [update],
+  );
+
+  const openFramePicker = useCallback(() => {
+    if (selectedPlacement < 0) return;
+    const placement = level.tiles[selectedPlacement];
+    if (!placement) return;
+    setFramePickerTilesetId(placement.tileset || activeTilesetId);
+    setFramePickerOpen(true);
+  }, [activeTilesetId, level.tiles, selectedPlacement]);
+
+  const addFrameToPlacement = useCallback(
+    (tilesetId: string, tileId: number) => {
+      if (selectedPlacement < 0) return;
+      update((prev) => {
+        const current = prev.tiles[selectedPlacement];
+        if (!current) return prev;
+        const frames = current.frames?.length
+          ? [...current.frames]
+          : [{ tileset: current.tileset, id: current.id }];
+        frames.push({ tileset: tilesetId, id: tileId });
+        return {
+          ...prev,
+          tiles: prev.tiles.map((tile, i) =>
+            i === selectedPlacement
+              ? { ...tile, frames, frame_ms: tile.frame_ms ?? DEFAULT_FRAME_MS }
+              : tile,
+          ),
+        };
+      });
+      setFramePickerOpen(false);
+      setStatus(`Added frame ${tilesetId}:${tileId}`);
+    },
+    [selectedPlacement, update],
+  );
 
   const deleteSelectedPlacement = useCallback(() => {
     if (selectedPlacement < 0) return;
@@ -426,12 +473,16 @@ export function App() {
           mode={mode}
           selected={selected}
           selectedPlacement={selectedPlacement}
+          tilesets={tilesets}
+          tilesetImages={tilesetImages}
           snapGrid={snapGrid}
           onLevelPatch={(patch) => update((prev) => ({ ...prev, ...patch }))}
           onResizeMap={resizeMap}
           onObjectPatch={updateObject}
+          onUpdatePlacement={updatePlacement}
           onDeleteObject={deleteSelectedObject}
           onDeletePlacement={deleteSelectedPlacement}
+          onAddFrame={openFramePicker}
           onSnapGridChange={setSnapGrid}
         />
 
@@ -447,6 +498,20 @@ export function App() {
         selectedTileId={selectedTileId}
         onSelect={setSelectedTileId}
         onClose={() => setTilePickerOpen(false)}
+      />
+
+      <TilesetPickerModal
+        open={framePickerOpen}
+        tileset={tilesets.get(framePickerTilesetId) ?? null}
+        image={tilesetImages.get(framePickerTilesetId) ?? null}
+        selectedTileId={0}
+        tilesets={tilesets}
+        tilesetImages={tilesetImages}
+        activeTilesetId={framePickerTilesetId}
+        onTilesetChange={setFramePickerTilesetId}
+        onSelectFrame={addFrameToPlacement}
+        onClose={() => setFramePickerOpen(false)}
+        title="Pick animation frame"
       />
 
       <input
