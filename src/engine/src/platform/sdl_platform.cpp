@@ -111,6 +111,10 @@ void SdlPlatform::poll_events(input::InputSystem& input) {
 
     SDL_Event event{};
     while (SDL_PollEvent(&event)) {
+        if (event_hook_) {
+            event_hook_(event);
+        }
+
         switch (event.type) {
         case SDL_QUIT:
             close_requested_ = true;
@@ -119,6 +123,23 @@ void SdlPlatform::poll_events(input::InputSystem& input) {
         case SDL_KEYDOWN:
         case SDL_KEYUP:
             apply_keyboard_event(event.key, input);
+            break;
+        case SDL_MOUSEMOTION:
+            input.set_mouse_position(
+                static_cast<float>(event.motion.x),
+                static_cast<float>(event.motion.y));
+            break;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP: {
+            input.set_mouse_position(
+                static_cast<float>(event.button.x),
+                static_cast<float>(event.button.y));
+            const bool down = event.type == SDL_MOUSEBUTTONDOWN;
+            input.set_mouse_button(static_cast<int>(event.button.button), down);
+            break;
+        }
+        case SDL_MOUSEWHEEL:
+            input.add_mouse_wheel(static_cast<float>(event.wheel.y));
             break;
         case SDL_WINDOWEVENT:
             if (event.window.event == SDL_WINDOWEVENT_RESIZED) {

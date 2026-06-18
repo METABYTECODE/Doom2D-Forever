@@ -3,8 +3,10 @@
 struct SDL_Renderer;
 struct SDL_Texture;
 struct SDL_Window;
+union SDL_Event;
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <unordered_map>
@@ -25,6 +27,7 @@ public:
     SdlRenderer& operator=(const SdlRenderer&) = delete;
 
     [[nodiscard]] std::string_view backend_name() const override { return "sdl"; }
+    [[nodiscard]] SDL_Renderer* native_renderer() const { return renderer_; }
 
     void begin_frame() override;
     void end_frame() override;

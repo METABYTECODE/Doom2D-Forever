@@ -52,4 +52,15 @@ Rect Camera2D::screen_to_world(const Rect& screen_rect) const {
     };
 }
 
+void Camera2D::screen_to_world_point(
+    const float screen_x,
+    const float screen_y,
+    float& world_x,
+    float& world_y) const {
+    const float screen_center_x = static_cast<float>(viewport_width) * 0.5f;
+    const float screen_center_y = static_cast<float>(viewport_height) * 0.5f;
+    world_x = x + (screen_x - screen_center_x) / zoom;
+    world_y = y + (screen_y - screen_center_y) / zoom;
+}
+
 } // namespace rivet::render

@@ -19,6 +19,7 @@ public:
 
     [[nodiscard]] Rect world_to_screen(const Rect& world_rect) const;
     [[nodiscard]] Rect screen_to_world(const Rect& screen_rect) const;
+    [[nodiscard]] void screen_to_world_point(float screen_x, float screen_y, float& world_x, float& world_y) const;
 };
 
 } // namespace rivet::render

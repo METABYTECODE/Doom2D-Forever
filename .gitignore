@@ -17,3 +17,7 @@ compile_commands.json
 
 # vcpkg (if installed locally)
 /vcpkg_installed/
+
+# Web tools
+tools/rivet_level_editor/node_modules/
+tools/rivet_level_editor/dist/

@@ -1,11 +1,16 @@
 #pragma once
 
 struct SDL_Window;
+union SDL_Event;
+
+#include <functional>
 
 #include <rivet/platform/platform.hpp>
 #include <rivet/platform/window_config.hpp>
 
 namespace rivet::platform {
+
+using SdlEventHook = std::function<void(const SDL_Event&)>;
 
 /// SDL platform backend: window, events, timing. Rendering lives in rivet::render backends.
 class SdlPlatform final : public Platform {
@@ -21,6 +26,8 @@ public:
     [[nodiscard]] bool should_close() const override;
     [[nodiscard]] float frame_delta_seconds() const override;
 
+    void set_event_hook(SdlEventHook hook) { event_hook_ = std::move(hook); }
+
     [[nodiscard]] SDL_Window* sdl_window() const { return window_; }
     [[nodiscard]] int width() const { return width_; }
     [[nodiscard]] int height() const { return height_; }
@@ -32,6 +39,7 @@ private:
     bool close_requested_ = false;
     float frame_delta_seconds_ = 1.0f / 60.0f;
     std::uint64_t last_counter_ = 0;
+    SdlEventHook event_hook_;
 };
 
 } // namespace rivet::platform

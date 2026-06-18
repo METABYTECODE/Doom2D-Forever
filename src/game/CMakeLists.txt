@@ -3,6 +3,7 @@ add_library(rivet_game STATIC
     src/bounce_scene.cpp
     src/game_catalog.cpp
     src/level/level_loader.cpp
+    src/level/level_saver.cpp
     src/level/level_spawner.cpp
     src/level_game.cpp
     src/level_scene.cpp
