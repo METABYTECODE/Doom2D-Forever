@@ -1,3 +1,0 @@
-[submodule "src/lib/enet/ENet-Pascal"]
-	path = src/lib/enet/ENet-Pascal
-	url = https://github.com/cher-nov/ENet-Pascal.git

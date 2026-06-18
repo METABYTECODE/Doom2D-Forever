@@ -12,7 +12,7 @@ if not exist "%EXE%" (
 )
 
 if not exist "assets\content\manifest.json" (
-    echo [ERROR] Content not found. Run organize_assets.bat first.
+    echo [ERROR] Content not found. Ensure assets\content\manifest.json exists.
     pause
     exit /b 1
 )

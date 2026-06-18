@@ -148,8 +148,6 @@ add_library(d2df::render ALIAS d2df_render)
 target_include_directories(d2df_render
     PUBLIC
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-    PRIVATE
-        "${CMAKE_SOURCE_DIR}/src/tools/png2map"
 )
 
 target_link_libraries(d2df_render
@@ -160,6 +158,8 @@ target_link_libraries(d2df_render
         SDL2::SDL2
         SDL2_ttf::SDL2_ttf
 )
+
+target_include_directories(d2df_render PRIVATE ${Stb_INCLUDE_DIR})
 
 d2df_set_warnings(d2df_render)
 
@@ -233,6 +233,7 @@ target_link_libraries(d2df_app
     PUBLIC
         d2df::core
         d2df::core_impl
+        d2df::game
         d2df::render
         d2df::map
         d2df::sim

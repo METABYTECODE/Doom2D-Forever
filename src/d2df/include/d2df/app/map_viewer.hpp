@@ -8,17 +8,13 @@
 #include <d2df/core/fixed_timestep.hpp>
 #include <d2df/core/game_events.hpp>
 #include <d2df/core/resource_audit.hpp>
-#include <d2df/ecs/game_world.hpp>
-#include <d2df/map/map_document.hpp>
+#include <d2df/engine/render/tile_map_renderer.hpp>
+#include <d2df/game/gameplay_session.hpp>
 #include <d2df/render/camera2d.hpp>
-#include <d2df/render/map_renderer.hpp>
-#include <d2df/render/map_render_index.hpp>
 #include <d2df/render/text_renderer.hpp>
 #include <d2df/render/texture_cache.hpp>
 #include <d2df/resources/asset_database.hpp>
-#include <d2df/sim/map_collision.hpp>
 #include <d2df/sim/effect_types.hpp>
-#include <d2df/sim/trigger_system.hpp>
 #include <d2df/sim/weapon_types.hpp>
 
 #include <filesystem>
@@ -71,7 +67,7 @@ public:
     void draw_debug_overlays(int viewport_w, int viewport_h);
 #endif
 
-    [[nodiscard]] const map::MapDocument& map() const { return map_; }
+    [[nodiscard]] const map::MapDocument& map() const { return session_.legacy_map(); }
     [[nodiscard]] const render::Camera2D& camera() const { return camera_; }
     [[nodiscard]] core::ResourceSnapshot build_resource_snapshot() const;
 
@@ -127,14 +123,10 @@ private:
     std::filesystem::path content_root_;
     std::filesystem::path current_map_path_;
     d2df::resources::AssetDatabase assets_;
-    map::MapDocument map_;
-    render::MapRenderIndex map_render_index_;
+    game::GameplaySession session_;
     render::Camera2D camera_;
-    render::MapRenderer map_renderer_;
+    engine::render::TileMapRenderer tile_map_renderer_;
     render::TextRenderer text_;
-    sim::MapCollision collision_;
-    sim::TriggerSystem triggers_;
-    ecs::GameWorld world_;
     FixedTimestep fixed_timestep_;
     std::unique_ptr<render::TextureCache> textures_;
     std::vector<std::filesystem::path> map_list_;

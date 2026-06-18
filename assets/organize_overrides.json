@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "Manual overrides for d2df-organize. Match fields are optional filters.",
+  "overrides": [
+    {
+      "archive": "game.WAD",
+      "virtual_path": "TEXTURES/",
+      "slug": "menufont",
+      "content_dir": "textures/ui/menu",
+      "asset_id": "tex.ui.menufont"
+    }
+  ]
+}

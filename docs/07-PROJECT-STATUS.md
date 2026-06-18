@@ -19,28 +19,30 @@
 | **Phase 6** — monsters, items, triggers | ✅ **Готово** |
 | **Phase 7** — HUD, audio, pause menu | ✅ **Готово** (звук — доработки позже) |
 | **Phase 8** — polish | 🔄 **В работе** (perf + leaks; bots/COOP отложены) |
+| **Engine + Game bridge** | ✅ `d2df_engine`, `d2df_game`; `d2df.exe` рендерит через engine |
 
-**Следующий шаг:** Phase 8 — performance profiling, leak checks. Bots/COOP/MP — после rewrite.
+**Следующий шаг:** batch legacy→`d2df-tilemap` converter; динамические тайлы (двери); web/native editor. `MapViewer` уже на `GameplaySession` + `TileMapRenderer`.
 
 ---
 
 ## Быстрый старт (Windows)
 
 ```bat
-build.bat              REM cmake + Release build
-extract_assets.bat     REM assets/ → assets/staging/  (~10 мин с ffmpeg)
-organize_assets.bat    REM assets/staging/ → assets/content/
-import_maps.bat        REM mapbin → JSON maps + validation
+build.bat
+run_game.bat
+run_engine.bat
 ```
 
-Требования: CMake 3.25+, MSVC 2022, vcpkg (`VCPKG_ROOT` или `C:\vcpkg`), ffmpeg в PATH (для конвертации).
+Требования: CMake 3.25+, MSVC 2022, vcpkg (`VCPKG_ROOT` или `C:\vcpkg`).
+
+Runtime assets: `assets/content/` (уже распакованы в репозитории).
 
 ---
 
 ## Phase 0 — сделано ✅
 
 - CMake: `src/d2df/`, `src/d2df_client/`, `src/d2df_server/`, `tools/`, `tests/`
-- vcpkg manifest: SDL2, spdlog, fmt, Catch2, zlib
+- vcpkg manifest: SDL2, spdlog, fmt, Catch2, zlib, stb, EnTT
 - `d2df.exe` — SDL2 окно, ESC для выхода
 - `d2df_server.exe` — headless stub
 - **Core:** `EventBus`, `ServiceRegistry`, `ISimulationAuthority` / `LocalSimulationAuthority`
@@ -51,8 +53,7 @@ import_maps.bat        REM mapbin → JSON maps + validation
 
 ### Не сделано / отложено
 
-- [ ] `assets/legacy/` как отдельная папка — пользователь кладёт WAD в `assets/data/`, `assets/maps/`, `assets/wads/` (работает)
-- [ ] glm в vcpkg — не подключали (не нужен до Phase 3)
+- [ ] glm в vcpkg — не подключали (не нужен до OpenGL renderer)
 
 ---
 
@@ -354,8 +355,9 @@ JPEG + MIDI format sniff
 | Roadmap | `docs/03-WORK-PLAN.md` |
 | Стратегия | `docs/06-REVISED-STRATEGY.md` |
 | DFWAD spec | `docs/05-FORMAT-SPEC.md` |
-| Pascal anim textures | `src/game/g_map.pas` → `CreateAnimTexture` |
-| Pascal textures | `src/game/g_textures.pas` |
+| Engine architecture | `docs/08-ENGINE-ARCHITECTURE.md` |
+| GameplaySession | `src/game/include/d2df/game/gameplay_session.hpp` |
+| TileMap + loader | `src/engine/include/d2df/engine/map/` |
 | Extract pipeline | `tools/lib/d2df_archive/src/extract_pipeline.cpp` |
 | Nested unwrap | `tools/lib/d2df_archive/src/nested_resource.cpp` |
 | AssetDatabase | `src/d2df/include/d2df/resources/asset_database.hpp` |
@@ -371,17 +373,13 @@ JPEG + MIDI format sniff
 # Build
 .\build.bat
 
-# Extract (full)
-.\extract_assets.bat
+# Run
+.\run_game.bat
+.\run_engine.bat
 
-# Organize
-.\organize_assets.bat
-
-# Import maps (mapbin → JSON + validate)
-.\import_maps.bat
-
-# Inspect WAD
-.\build\tools\d2df_wad_ls\Release\d2df-wad-ls.exe assets\data\game.WAD
+# Import tools (optional, needs legacy WAD archives)
+.\build\tools\d2df_extract\Release\d2df-extract.exe --input path\to\wads --output assets\staging
+.\build\tools\d2df_organize\Release\d2df-organize.exe --staging assets\staging --output assets\content
 
 # Tests
 ctest --test-dir build -C Release

@@ -10,6 +10,7 @@
     "spdlog",
     "fmt",
     "catch2",
-    "zlib"
+    "zlib",
+    "stb"
   ]
 }

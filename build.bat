@@ -24,6 +24,7 @@ if errorlevel 1 goto :failed
 echo.
 echo === Done ===
 echo   Client:  build\src\d2df_client\Release\d2df.exe
+echo   Engine:  build\src\d2df_engine_playground\Release\d2df_engine.exe
 echo   Extract: build\tools\d2df_extract\Release\d2df-extract.exe
 echo   Organize: build\tools\d2df_organize\Release\d2df-organize.exe
 exit /b 0
