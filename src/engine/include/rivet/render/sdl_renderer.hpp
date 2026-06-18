@@ -43,7 +43,10 @@ public:
         int width,
         int height) override;
     void unload_texture(resources::TextureHandle handle) override;
-    void draw_texture(resources::TextureHandle handle, const Rect& dest) override;
+    void draw_texture(
+        resources::TextureHandle handle,
+        const Rect& dest,
+        const Rect& source = {}) override;
     [[nodiscard]] std::optional<resources::TextureInfo> texture_info(
         resources::TextureHandle handle) const override;
 

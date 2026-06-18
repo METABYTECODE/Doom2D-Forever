@@ -162,7 +162,10 @@ void SdlRenderer::unload_texture(const resources::TextureHandle handle) {
     texture_info_.erase(handle);
 }
 
-void SdlRenderer::draw_texture(const resources::TextureHandle handle, const Rect& dest) {
+void SdlRenderer::draw_texture(
+    const resources::TextureHandle handle,
+    const Rect& dest,
+    const Rect& source) {
     if (renderer_ == nullptr) {
         return;
     }
@@ -174,6 +177,18 @@ void SdlRenderer::draw_texture(const resources::TextureHandle handle, const Rect
 
     const Rect screen_rect = apply_camera(dest);
     const SDL_FRect target{screen_rect.x, screen_rect.y, screen_rect.width, screen_rect.height};
+
+    if (source.width > 0.0f && source.height > 0.0f) {
+        const SDL_Rect src{
+            static_cast<int>(source.x),
+            static_cast<int>(source.y),
+            static_cast<int>(source.width),
+            static_cast<int>(source.height),
+        };
+        SDL_RenderCopyF(renderer_, it->second, &src, &target);
+        return;
+    }
+
     SDL_RenderCopyF(renderer_, it->second, nullptr, &target);
 }
 

@@ -64,3 +64,53 @@ export function paintCollisionBorder(level: LevelData): LevelData {
 export function worldCellSize(level: LevelData): number {
   return level.grid_size || GRID_SIZE;
 }
+
+/** Grid cells along a line (Bresenham), inclusive of both endpoints. */
+export function gridLineCells(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): Array<{ x: number; y: number }> {
+  const cells: Array<{ x: number; y: number }> = [];
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx - dy;
+
+  while (true) {
+    cells.push({ x, y });
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 > -dy) {
+      err -= dy;
+      x += sx;
+    }
+    if (e2 < dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+
+  return cells;
+}
+
+export function paintCollisionCells(
+  collision: number[][],
+  cells: Array<{ x: number; y: number }>,
+  value: number,
+  width: number,
+  height: number,
+): boolean {
+  let changed = false;
+  for (const { x, y } of cells) {
+    if (x < 0 || y < 0 || x >= width || y >= height) continue;
+    if ((collision[y]?.[x] ?? 0) === value) continue;
+    collision[y][x] = value;
+    changed = true;
+  }
+  return changed;
+}

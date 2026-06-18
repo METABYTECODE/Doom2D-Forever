@@ -1,6 +1,7 @@
 add_library(rivet_game STATIC
     src/bounce_game.cpp
     src/bounce_scene.cpp
+    src/content/content_paths.cpp
     src/game_catalog.cpp
     src/level/level_loader.cpp
     src/level/level_saver.cpp
@@ -9,6 +10,7 @@ add_library(rivet_game STATIC
     src/level_scene.cpp
     src/sandbox_game.cpp
     src/sandbox_scene.cpp
+    src/tileset/tileset_catalog.cpp
 )
 
 add_library(rivet::game ALIAS rivet_game)

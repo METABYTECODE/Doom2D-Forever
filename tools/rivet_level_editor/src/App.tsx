@@ -11,7 +11,7 @@ import { LevelCanvas } from "./components/LevelCanvas";
 import { TilesetPickerModal } from "./components/TilesetPickerModal";
 import { useLevelHistory } from "./hooks/useLevelHistory";
 import { hitObject, snapPoint, tileAt } from "./lib/geometry";
-import { worldCellSize } from "./lib/level-collision";
+import { gridLineCells, worldCellSize } from "./lib/level-collision";
 import {
   createBlankLevel,
   downloadLevel,
@@ -26,13 +26,12 @@ import type {
   EditorMode,
   LevelObject,
   ObjectTool,
-  PlacedTile,
   TileTool,
 } from "./types/level";
 import type { TilesetDef } from "./types/tileset";
 
 export function App() {
-  const { level, dirty, replace, update, undo, redo, markSaved, canUndo, canRedo } =
+  const { level, dirty, replace, update, beginStroke, endStroke, undo, redo, markSaved, canUndo, canRedo } =
     useLevelHistory(createBlankLevel());
   const [mode, setMode] = useState<EditorMode>("tiles");
   const [tileTool, setTileTool] = useState<TileTool>("paint");
@@ -166,7 +165,12 @@ export function App() {
     return snapGrid ? snapPoint(worldX, worldY, cell) : { x: worldX, y: worldY };
   };
 
-  const onCanvasPointer = (worldX: number, worldY: number, button: number) => {
+  const onCanvasPointer = (
+    worldX: number,
+    worldY: number,
+    button: number,
+    strokeFrom?: { tx: number; ty: number },
+  ) => {
     const cell = worldCellSize(level);
     const { x: tx, y: ty } = tileAt(worldX, worldY, cell);
 
@@ -184,25 +188,59 @@ export function App() {
 
     if (mode === "tiles") {
       if (tileTool === "paint" && button === 0) {
-        if (tx < 0 || ty < 0 || tx >= level.width || ty >= level.height) return;
-        if (!canPlaceTile(level.tiles, tilesets, activeTilesetId, selectedTileId, tx, ty, level.width, level.height)) {
-          return;
-        }
-        const placement: PlacedTile = {
-          tileset: activeTilesetId,
-          id: selectedTileId,
-          x: tx,
-          y: ty,
-        };
-        update((prev) => ({ ...prev, tiles: [...prev.tiles, placement] }));
+        const cells = strokeFrom
+          ? gridLineCells(strokeFrom.tx, strokeFrom.ty, tx, ty)
+          : [{ x: tx, y: ty }];
+        update((prev) => {
+          const tiles = [...prev.tiles];
+          let changed = false;
+          for (const { x, y } of cells) {
+            if (x < 0 || y < 0 || x >= prev.width || y >= prev.height) continue;
+            if (
+              !canPlaceTile(
+                tiles,
+                tilesets,
+                activeTilesetId,
+                selectedTileId,
+                x,
+                y,
+                prev.width,
+                prev.height,
+              )
+            ) {
+              continue;
+            }
+            tiles.push({
+              tileset: activeTilesetId,
+              id: selectedTileId,
+              x,
+              y,
+            });
+            changed = true;
+          }
+          if (!changed) return prev;
+          return { ...prev, tiles };
+        });
         return;
       }
 
       if (tileTool === "erase" && button === 0) {
-        const hit = findPlacementAt(level.tiles, tilesets, tx, ty);
-        if (hit < 0) return;
-        update((prev) => ({ ...prev, tiles: prev.tiles.filter((_, i) => i !== hit) }));
-        if (selectedPlacement === hit) setSelectedPlacement(-1);
+        const cells = strokeFrom
+          ? gridLineCells(strokeFrom.tx, strokeFrom.ty, tx, ty)
+          : [{ x: tx, y: ty }];
+        update((prev) => {
+          const toRemove = new Set<number>();
+          for (const { x, y } of cells) {
+            const hit = findPlacementAt(prev.tiles, tilesets, x, y);
+            if (hit >= 0) toRemove.add(hit);
+          }
+          if (toRemove.size === 0) return prev;
+          const nextTiles = prev.tiles.filter((_, i) => !toRemove.has(i));
+          if (selectedPlacement >= 0 && toRemove.has(selectedPlacement)) {
+            setSelectedPlacement(-1);
+          }
+          return { ...prev, tiles: nextTiles };
+        });
         return;
       }
 
@@ -366,6 +404,8 @@ export function App() {
             selectedPlacement={selectedPlacement}
             mapRevision={mapRevision}
             onPointer={onCanvasPointer}
+            onStrokeBegin={beginStroke}
+            onStrokeEnd={endStroke}
             onObjectDrag={onObjectDrag}
             onPlacementDrag={onPlacementDrag}
           />

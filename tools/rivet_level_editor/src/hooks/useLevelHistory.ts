@@ -9,11 +9,14 @@ type State = {
   past: LevelData[];
   future: LevelData[];
   dirty: boolean;
+  strokeBase: LevelData | null;
 };
 
 type Action =
   | { type: "replace"; level: LevelData; clean?: boolean }
   | { type: "update"; updater: (prev: LevelData) => LevelData }
+  | { type: "begin_stroke" }
+  | { type: "end_stroke" }
   | { type: "undo" }
   | { type: "redo" }
   | { type: "saved" };
@@ -26,15 +29,34 @@ function reducer(state: State, action: Action): State {
         past: [],
         future: [],
         dirty: !action.clean,
+        strokeBase: null,
       };
     case "update": {
       const next = ensureLevelCollision(action.updater(state.level));
       if (next === state.level) return state;
+      if (state.strokeBase) {
+        return { ...state, level: next };
+      }
       return {
         level: next,
         past: [...state.past.slice(-MAX_HISTORY + 1), state.level],
         future: [],
         dirty: true,
+        strokeBase: null,
+      };
+    }
+    case "begin_stroke":
+      return { ...state, strokeBase: state.level };
+    case "end_stroke": {
+      if (!state.strokeBase || state.strokeBase === state.level) {
+        return { ...state, strokeBase: null };
+      }
+      return {
+        level: state.level,
+        past: [...state.past.slice(-MAX_HISTORY + 1), state.strokeBase],
+        future: [],
+        dirty: true,
+        strokeBase: null,
       };
     }
     case "undo": {
@@ -70,6 +92,7 @@ export function useLevelHistory(initial: LevelData) {
     past: [],
     future: [],
     dirty: false,
+    strokeBase: null,
   });
 
   const replace = useCallback((level: LevelData, clean = false) => {
@@ -80,6 +103,9 @@ export function useLevelHistory(initial: LevelData) {
     dispatch({ type: "update", updater });
   }, []);
 
+  const beginStroke = useCallback(() => dispatch({ type: "begin_stroke" }), []);
+  const endStroke = useCallback(() => dispatch({ type: "end_stroke" }), []);
+
   const undo = useCallback(() => dispatch({ type: "undo" }), []);
   const redo = useCallback(() => dispatch({ type: "redo" }), []);
   const markSaved = useCallback(() => dispatch({ type: "saved" }), []);
@@ -89,6 +115,8 @@ export function useLevelHistory(initial: LevelData) {
     dirty: state.dirty,
     replace,
     update,
+    beginStroke,
+    endStroke,
     undo,
     redo,
     markSaved,

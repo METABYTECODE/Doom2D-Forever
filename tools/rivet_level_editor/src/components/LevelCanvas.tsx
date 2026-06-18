@@ -22,7 +22,14 @@ interface Props {
   selectedObject: number;
   selectedPlacement: number;
   mapRevision: number;
-  onPointer: (worldX: number, worldY: number, button: number) => void;
+  onPointer: (
+    worldX: number,
+    worldY: number,
+    button: number,
+    strokeFrom?: { tx: number; ty: number },
+  ) => void;
+  onStrokeBegin?: () => void;
+  onStrokeEnd?: () => void;
   onObjectDrag: (index: number, worldX: number, worldY: number) => void;
   onPlacementDrag: (index: number, cellX: number, cellY: number) => void;
 }
@@ -58,6 +65,8 @@ export function LevelCanvas({
   selectedPlacement,
   mapRevision,
   onPointer,
+  onStrokeBegin,
+  onStrokeEnd,
   onObjectDrag,
   onPlacementDrag,
 }: Props) {
@@ -66,6 +75,8 @@ export function LevelCanvas({
   const [camera, setCamera] = useState({ x: 320, y: 240, zoom: 2 });
 
   const paintingRef = useRef(false);
+  const strokeButtonRef = useRef(0);
+  const lastStrokeCellRef = useRef<{ tx: number; ty: number } | null>(null);
   const spaceRef = useRef(false);
   const panRef = useRef({ active: false, sx: 0, sy: 0, cx: 0, cy: 0 });
   const dragRef = useRef<
@@ -188,20 +199,10 @@ export function LevelCanvas({
 
       const cellScreen = cell * cam.zoom;
 
-      for (let y = 0; y < lvl.height; y++) {
+    for (let y = 0; y < lvl.height; y++) {
         for (let x = 0; x < lvl.width; x++) {
           const p = toScreen(x * cell, y * cell);
           ctx.fillStyle = (x + y) % 2 === 0 ? "#151820" : "#12151c";
-          ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
-        }
-      }
-
-      for (let y = 0; y < lvl.height; y++) {
-        for (let x = 0; x < lvl.width; x++) {
-          if ((lvl.collision[y]?.[x] ?? 0) === 0) continue;
-          const p = toScreen(x * cell, y * cell);
-          ctx.fillStyle =
-            state.mode === "collision" ? "rgba(220, 80, 80, 0.45)" : "rgba(220, 80, 80, 0.15)";
           ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
         }
       }
@@ -240,10 +241,36 @@ export function LevelCanvas({
         }
       });
 
+      // Collision overlay — always on top of tiles.
+      const collisionFill =
+        state.mode === "collision" ? "rgba(255, 50, 50, 0.55)" : "rgba(255, 70, 70, 0.32)";
+      const collisionStroke =
+        state.mode === "collision" ? "rgba(255, 220, 120, 0.95)" : "rgba(255, 180, 100, 0.55)";
+
+      for (let y = 0; y < lvl.height; y++) {
+        for (let x = 0; x < lvl.width; x++) {
+          if ((lvl.collision[y]?.[x] ?? 0) === 0) continue;
+          const p = toScreen(x * cell, y * cell);
+          ctx.fillStyle = collisionFill;
+          ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
+          ctx.strokeStyle = collisionStroke;
+          ctx.lineWidth = state.mode === "collision" ? 2 : 1;
+          ctx.strokeRect(p.x + 0.5, p.y + 0.5, cellScreen - 1, cellScreen - 1);
+          if (state.mode === "collision" && cellScreen >= 6) {
+            ctx.beginPath();
+            ctx.moveTo(p.x + 2, p.y + 2);
+            ctx.lineTo(p.x + cellScreen - 2, p.y + cellScreen - 2);
+            ctx.moveTo(p.x + cellScreen - 2, p.y + 2);
+            ctx.lineTo(p.x + 2, p.y + cellScreen - 2);
+            ctx.stroke();
+          }
+        }
+      }
+
       if (hover) {
         const hp = toScreen(hover.tx * cell, hover.ty * cell);
         ctx.strokeStyle =
-          state.mode === "collision" ? "rgba(255,120,120,0.9)" : "rgba(110,168,255,0.85)";
+          state.mode === "collision" ? "rgba(255,200,100,1)" : "rgba(110,168,255,0.9)";
         ctx.lineWidth = 2;
         ctx.strokeRect(hp.x, hp.y, cellScreen, cellScreen);
       }
@@ -308,6 +335,24 @@ export function LevelCanvas({
     (mode === "tiles" && (tileTool === "paint" || tileTool === "erase")) ||
     (mode === "collision" && (collisionTool === "paint" || collisionTool === "erase"));
 
+  const paintStroke = (clientX: number, clientY: number, button: number, isStrokeStart: boolean) => {
+    const world = screenToWorld(clientX, clientY);
+    const cell = worldCellSize(level);
+    const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
+
+    if (isStrokeStart) {
+      lastStrokeCellRef.current = { tx, ty };
+      onPointer(world.x, world.y, button);
+      return;
+    }
+
+    const last = lastStrokeCellRef.current;
+    if (!last || last.tx !== tx || last.ty !== ty) {
+      onPointer(world.x, world.y, button, last ?? undefined);
+      lastStrokeCellRef.current = { tx, ty };
+    }
+  };
+
   return (
     <div
       ref={containerRef}
@@ -353,7 +398,9 @@ export function LevelCanvas({
 
         if (strokeActive && e.button === 0) {
           paintingRef.current = true;
-          onPointer(world.x, world.y, e.button);
+          strokeButtonRef.current = e.button;
+          onStrokeBegin?.();
+          paintStroke(e.clientX, e.clientY, e.button, true);
           return;
         }
 
@@ -395,10 +442,15 @@ export function LevelCanvas({
         }
 
         if (!paintingRef.current) return;
-        onPointer(world.x, world.y, e.button);
+        const button = e.buttons & 1 ? strokeButtonRef.current : e.button;
+        paintStroke(e.clientX, e.clientY, button, false);
       }}
       onPointerUp={(e) => {
+        if (paintingRef.current) {
+          onStrokeEnd?.();
+        }
         paintingRef.current = false;
+        lastStrokeCellRef.current = null;
         panRef.current.active = false;
         dragRef.current = null;
         try {
@@ -408,7 +460,11 @@ export function LevelCanvas({
         }
       }}
       onPointerLeave={() => {
+        if (paintingRef.current) {
+          onStrokeEnd?.();
+        }
         paintingRef.current = false;
+        lastStrokeCellRef.current = null;
         panRef.current.active = false;
         dragRef.current = null;
         hoverRef.current = null;
