@@ -11,6 +11,7 @@ namespace rivet::game {
 namespace {
 
 constexpr int kSolidTile = 1;
+constexpr float kMoveSpeed = 280.0f;
 
 [[nodiscard]] LevelScene* active_level(rivet::core::GameContext& context) {
     return static_cast<LevelScene*>(context.scenes().active());
@@ -33,12 +34,19 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
     context.scenes().push(std::make_unique<LevelScene>(level_));
 
     if (auto* scene = active_level(context)) {
-        const float margin = 48.0f;
+        float bounds_margin_x = 48.0f;
+        float bounds_margin_y = 48.0f;
+        if (scene->player_entity() != rivet::ecs::kNullEntity) {
+            const auto& collider = scene->world().registry().get<rivet::ecs::components::Collider>(
+                scene->player_entity());
+            bounds_margin_x = collider.width;
+            bounds_margin_y = collider.height;
+        }
         physics_.set_world_bounds({
             .min_x = 0.0f,
             .min_y = 0.0f,
-            .max_x = scene->world_width() - margin,
-            .max_y = scene->world_height() - margin,
+            .max_x = scene->world_width() - bounds_margin_x,
+            .max_y = scene->world_height() - bounds_margin_y,
             .enabled = true,
         });
     }
@@ -68,11 +76,18 @@ void LevelGame::on_update(rivet::core::GameContext& context, float delta_time) {
         context.request_quit();
     }
 
+    auto* scene = active_level(context);
+    if (scene != nullptr && scene->player_entity() != rivet::ecs::kNullEntity) {
+        auto& velocity = scene->world().registry().get<rivet::ecs::components::Velocity>(
+            scene->player_entity());
+        velocity.x = context.input().state().move_x * kMoveSpeed;
+        velocity.y = context.input().state().move_y * kMoveSpeed;
+    }
+
     if (!context.has_service<rivet::render::IRenderer>()) {
         return;
     }
 
-    const auto* scene = active_level(context);
     if (scene == nullptr || scene->player_entity() == rivet::ecs::kNullEntity) {
         return;
     }

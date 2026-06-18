@@ -48,7 +48,9 @@ void spawn_object(rivet::ecs::World& world, const LevelObject& object, rivet::ec
     world.registry().emplace<Transform>(entity, Transform{.x = object.x, .y = object.y});
 
     if (object.type == "player" || object.type == "patrol") {
-        world.registry().emplace<Velocity>(entity, Velocity{.x = object.vel_x, .y = object.vel_y});
+        const float vel_x = object.type == "player" ? 0.0f : object.vel_x;
+        const float vel_y = object.type == "player" ? 0.0f : object.vel_y;
+        world.registry().emplace<Velocity>(entity, Velocity{.x = vel_x, .y = vel_y});
         world.registry().emplace<Collider>(
             entity,
             Collider{.width = object.width, .height = object.height, .is_static = false});
