@@ -1,7 +1,9 @@
+#include <rivet/audio/audio_system.hpp>
 #include <rivet/platform/bootstrap.hpp>
 
 #include <memory>
 
+#include <spdlog/spdlog.h>
 #include <rivet/platform/sdl_platform.hpp>
 #include <rivet/physics/physics_world.hpp>
 #include <rivet/render/irenderer.hpp>
@@ -33,6 +35,12 @@ void install_backends(core::Application& app, const BootstrapConfig& config) {
     app.services().register_service<render::IRenderer>(renderer);
     app.services().register_service<resources::ResourceManager>(resources);
     app.services().register_service<physics::PhysicsWorld>(std::make_shared<physics::PhysicsWorld>());
+
+    auto audio = std::make_shared<audio::AudioSystem>();
+    if (!audio->init()) {
+        spdlog::warn("Audio backend unavailable; continuing without sound");
+    }
+    app.services().register_service<audio::AudioSystem>(audio);
 }
 
 BootstrapConfig parse_bootstrap_config(const int argc, char** argv) {

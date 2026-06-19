@@ -42,6 +42,7 @@ private:
     std::optional<resources::ResourcePack> resource_pack_;
     std::filesystem::path assets_root_;
     std::filesystem::path music_path_;
+    std::filesystem::path jump_sfx_path_;
     float animation_time_ = 0.0f;
 
     struct PlayerMotion {

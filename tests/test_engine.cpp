@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <filesystem>
+
+#include <rivet/audio/audio_system.hpp>
 #include <rivet/core/application.hpp>
 #include <rivet/core/game_context.hpp>
 #include <rivet/ecs/components/collider.hpp>
@@ -15,7 +18,15 @@
 #include <rivet/render/renderer_factory.hpp>
 #include <rivet/scene/scene.hpp>
 
+#ifndef D2DF_SOURCE_DIR
+#define D2DF_SOURCE_DIR "."
+#endif
+
 namespace {
+
+std::filesystem::path source_path(const char* rel) {
+    return std::filesystem::path(D2DF_SOURCE_DIR) / rel;
+}
 
 class CounterScene final : public rivet::scene::Scene {
 public:
@@ -270,4 +281,20 @@ TEST_CASE("Renderer factory rejects unavailable OpenGL backend", "[engine][rende
     CHECK_THROWS_AS(
         rivet::render::create_renderer(rivet::render::RendererBackend::OpenGl, {}),
         std::runtime_error);
+}
+
+TEST_CASE("AudioSystem initializes and accepts music paths", "[engine][audio]") {
+    rivet::audio::AudioSystem audio;
+    CHECK(audio.init());
+    CHECK(audio.enabled());
+
+    const auto music = source_path("assets/resourcepacks/dev/audio/music/minidoom/Music/0055.ogg");
+    if (!std::filesystem::exists(music)) {
+        audio.shutdown();
+        SKIP("dev pack music not available");
+    }
+
+    audio.play_music(music.string());
+    audio.stop_music();
+    audio.shutdown();
 }

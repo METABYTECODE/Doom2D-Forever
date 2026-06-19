@@ -130,6 +130,22 @@ TEST_CASE("Level saver round-trips rivet-level v3 JSON", "[game][level]") {
     std::filesystem::remove(temp_path);
 }
 
+TEST_CASE("ResourcePack resolves nested music paths", "[game][resources]") {
+    const auto assets = source_path("assets");
+    if (!std::filesystem::exists(assets / "resourcepacks" / "dev" / "pack.json")) {
+        SKIP("dev resource pack not available");
+    }
+
+    const auto pack = rivet::game::resources::ResourcePack::load(assets, "dev");
+    REQUIRE(pack.has_value());
+
+    const auto music = pack->resolve_music("minidoom/Music/0055");
+    if (!music.has_value()) {
+        SKIP("sample music track not available in dev pack");
+    }
+    CHECK(std::filesystem::exists(*music));
+}
+
 TEST_CASE("Tileset anchor maps world pixel to destination rect", "[game][level]") {
     rivet::game::tileset::TilesetDef tileset;
     tileset.tile_width = 16;

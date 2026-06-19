@@ -1,4 +1,5 @@
 add_library(rivet_engine STATIC
+    src/audio/audio_system.cpp
     src/core/application.cpp
     src/core/clock.cpp
     src/core/event_bus.cpp
@@ -42,6 +43,7 @@ target_link_libraries(rivet_engine
         spdlog::spdlog
         fmt::fmt
         SDL2::SDL2
+        SDL2_mixer::SDL2_mixer
 )
 
 target_include_directories(rivet_engine PRIVATE ${Stb_INCLUDE_DIR})

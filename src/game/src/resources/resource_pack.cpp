@@ -196,4 +196,13 @@ std::optional<std::filesystem::path> ResourcePack::resolve_music(const std::stri
         sizeof(kExtensions) / sizeof(kExtensions[0]));
 }
 
+std::optional<std::filesystem::path> ResourcePack::resolve_sfx(const std::string& asset_id) const {
+    static constexpr const char* kExtensions[] = {".ogg", ".wav", ".mp3"};
+    return resolve_catalog_asset(
+        std::filesystem::path("audio") / "sfx",
+        asset_id,
+        kExtensions,
+        sizeof(kExtensions) / sizeof(kExtensions[0]));
+}
+
 } // namespace rivet::game::resources

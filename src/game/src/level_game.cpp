@@ -10,6 +10,7 @@
 #include <rivet/game/resources/resource_pack.hpp>
 #include <spdlog/spdlog.h>
 #include <rivet/game/level/level_loader.hpp>
+#include <rivet/audio/audio_system.hpp>
 #include <rivet/input/keys.hpp>
 #include <rivet/physics/aabb.hpp>
 #include <rivet/physics/fluid_grid.hpp>
@@ -136,8 +137,16 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
                     spdlog::warn("Music asset not found: {}", level_.music);
                 }
             }
+
+            if (const auto jump_sfx = resource_pack_->resolve_sfx("jump")) {
+                jump_sfx_path_ = *jump_sfx;
+            }
         }
         player_texture_ = resources.create_checkerboard(64, 8, "player");
+    }
+
+    if (!music_path_.empty() && context.has_service<rivet::audio::AudioSystem>()) {
+        context.service<rivet::audio::AudioSystem>().play_music(music_path_);
     }
 
     if (context.has_service<rivet::render::IRenderer>()) {
@@ -157,6 +166,9 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
 }
 
 void LevelGame::on_detach(rivet::core::GameContext& context) {
+    if (context.has_service<rivet::audio::AudioSystem>()) {
+        context.service<rivet::audio::AudioSystem>().stop_music();
+    }
     if (context.has_service<rivet::physics::PhysicsWorld>()) {
         context.service<rivet::physics::PhysicsWorld>().clear();
     }
@@ -165,6 +177,7 @@ void LevelGame::on_detach(rivet::core::GameContext& context) {
     background_texture_ = rivet::resources::kInvalidTexture;
     resource_pack_.reset();
     music_path_.clear();
+    jump_sfx_path_.clear();
     fluids_ = {};
     player_grounded_ = false;
     jump_buffer_time_ = 0.0f;
@@ -281,6 +294,9 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
                 velocity.y = -kJumpSpeed;
                 jump_buffer_time_ = 0.0f;
                 coyote_time_ = 0.0f;
+                if (!jump_sfx_path_.empty() && context.has_service<rivet::audio::AudioSystem>()) {
+                    context.service<rivet::audio::AudioSystem>().play_sfx(jump_sfx_path_);
+                }
             }
         }
     }

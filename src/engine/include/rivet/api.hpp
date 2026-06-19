@@ -32,3 +32,4 @@
 #include <rivet/resources/texture.hpp>
 #include <rivet/scene/scene.hpp>
 #include <rivet/scene/scene_manager.hpp>
+#include <rivet/audio/audio_system.hpp>
