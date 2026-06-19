@@ -1,6 +1,8 @@
 export const LEVEL_FORMAT = "rivet-level" as const;
 export const LEVEL_VERSION = 3;
 export const GRID_SIZE = 16;
+export const DEFAULT_PLAYER_WIDTH = 34;
+export const DEFAULT_PLAYER_HEIGHT = 52;
 export const DEFAULT_MAP_WIDTH_PX = 640;
 export const DEFAULT_MAP_HEIGHT_PX = 480;
 

@@ -96,7 +96,7 @@ import type {
 
 } from "./types/level";
 
-import { DEFAULT_FRAME_MS } from "./types/level";
+import { DEFAULT_FRAME_MS, DEFAULT_PLAYER_HEIGHT, DEFAULT_PLAYER_WIDTH } from "./types/level";
 
 import type { TilesetDef } from "./types/tileset";
 
@@ -1047,9 +1047,9 @@ export function App() {
 
           y: pos.y,
 
-          width: isPlayer ? 40 : 64,
+          width: isPlayer ? DEFAULT_PLAYER_WIDTH : 64,
 
-          height: isPlayer ? 40 : 64,
+          height: isPlayer ? DEFAULT_PLAYER_HEIGHT : 64,
 
           vel_x: 0,
 

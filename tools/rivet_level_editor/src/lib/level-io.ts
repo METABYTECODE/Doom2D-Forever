@@ -2,6 +2,8 @@ import {
   DEFAULT_FRAME_MS,
   DEFAULT_MAP_HEIGHT_PX,
   DEFAULT_MAP_WIDTH_PX,
+  DEFAULT_PLAYER_HEIGHT,
+  DEFAULT_PLAYER_WIDTH,
   GRID_SIZE,
   LEVEL_FORMAT,
   LEVEL_VERSION,
@@ -66,98 +68,19 @@ function parsePlacedTile(raw: Record<string, unknown>): PlacedTile {
 }
 
 function parseObject(raw: Record<string, unknown>, index: number): LevelObject {
+  const type = String(raw.type ?? "block");
+  const defaultWidth = type === "player" ? DEFAULT_PLAYER_WIDTH : 48;
+  const defaultHeight = type === "player" ? DEFAULT_PLAYER_HEIGHT : 48;
   return {
     id: String(raw.id ?? `object_${index}`),
-    type: String(raw.type ?? "block"),
+    type,
     x: Number(raw.x ?? 0),
     y: Number(raw.y ?? 0),
-    width: Number(raw.width ?? 48),
-    height: Number(raw.height ?? 48),
+    width: Number(raw.width ?? defaultWidth),
+    height: Number(raw.height ?? defaultHeight),
     vel_x: Number(raw.vx ?? raw.vel_x ?? 0),
     vel_y: Number(raw.vy ?? raw.vel_y ?? 0),
   };
-}
-
-function migrateV2ToV3(
-  raw: Record<string, unknown>,
-  tiles: PlacedTile[],
-  collision: number[][],
-  fluids: number[][],
-  objects: LevelObject[],
-): LevelData {
-  const gridSize = Number(raw.grid_size ?? GRID_SIZE);
-  const widthPx = Number(raw.width ?? 0) * gridSize;
-  const heightPx = Number(raw.height ?? 0) * gridSize;
-  const migratedTiles = tiles.map((tile) => ({
-    ...tile,
-    x: tile.x * gridSize,
-    y: tile.y * gridSize,
-  }));
-
-  return ensureLevelGrids({
-    format: LEVEL_FORMAT,
-    version: LEVEL_VERSION,
-    name: String(raw.name ?? "level"),
-    grid_size: gridSize,
-    width: widthPx,
-    height: heightPx,
-    resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),
-    background: String(raw.background ?? ""),
-    music: String(raw.music ?? ""),
-    tiles: migratedTiles,
-    collision,
-    fluids,
-    objects,
-  });
-}
-
-function convertLegacyLevel(raw: Record<string, unknown>): LevelData {
-  const legacyTileSize = Number(raw.tile_size ?? 32);
-  const gridSize = GRID_SIZE;
-  const scale = legacyTileSize / gridSize;
-  if (!Number.isInteger(scale) || scale < 1) {
-    throw new Error("Legacy tile_size must be a multiple of 8");
-  }
-
-  const legacyTiles = raw.tiles as number[][];
-  const legacyWidth = Number(raw.width ?? legacyTiles[0]?.length ?? 0);
-  const legacyHeight = Number(raw.height ?? legacyTiles.length ?? 0);
-  const cols = legacyWidth * scale;
-  const rows = legacyHeight * scale;
-  const widthPx = cols * gridSize;
-  const heightPx = rows * gridSize;
-  const collision = emptyCollision(cols, rows);
-
-  for (let y = 0; y < legacyHeight; y++) {
-    for (let x = 0; x < legacyWidth; x++) {
-      if ((legacyTiles[y]?.[x] ?? 0) !== 1) continue;
-      for (let dy = 0; dy < scale; dy++) {
-        for (let dx = 0; dx < scale; dx++) {
-          collision[y * scale + dy][x * scale + dx] = 1;
-        }
-      }
-    }
-  }
-
-  const objects = Array.isArray(raw.objects)
-    ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
-    : [];
-
-  return ensureLevelGrids({
-    format: LEVEL_FORMAT,
-    version: LEVEL_VERSION,
-    name: String(raw.name ?? "level"),
-    grid_size: gridSize,
-    width: widthPx,
-    height: heightPx,
-    resource_pack: DEFAULT_PACK_ID,
-    background: "",
-    music: "",
-    tiles: [],
-    collision,
-    fluids: emptyFluids(cols, rows),
-    objects,
-  });
 }
 
 export function parseLevelJson(text: string): LevelData {
@@ -167,11 +90,10 @@ export function parseLevelJson(text: string): LevelData {
   }
 
   const version = Number(raw.version);
-  if (version === 1) {
-    return convertLegacyLevel(raw);
-  }
-  if (version !== 2 && version !== LEVEL_VERSION) {
-    throw new Error(`Unsupported version: ${String(raw.version)}`);
+  if (version !== LEVEL_VERSION) {
+    throw new Error(
+      `Unsupported rivet-level version ${String(raw.version)} (expected v${LEVEL_VERSION}). Resave the map in the level editor.`,
+    );
   }
 
   const gridSize = Number(raw.grid_size ?? GRID_SIZE);
@@ -184,19 +106,15 @@ export function parseLevelJson(text: string): LevelData {
 
   const collision = Array.isArray(raw.collision)
     ? (raw.collision as number[][])
-    : emptyCollision(subGridCols(width * (version === 2 ? gridSize : 1), gridSize), subGridRows(height * (version === 2 ? gridSize : 1), gridSize));
+    : emptyCollision(subGridCols(width, gridSize), subGridRows(height, gridSize));
 
   const fluids = Array.isArray(raw.fluids)
     ? (raw.fluids as number[][])
-    : emptyFluids(subGridCols(width * (version === 2 ? gridSize : 1), gridSize), subGridRows(height * (version === 2 ? gridSize : 1), gridSize));
+    : emptyFluids(subGridCols(width, gridSize), subGridRows(height, gridSize));
 
   const objects = Array.isArray(raw.objects)
     ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
     : [];
-
-  if (version === 2) {
-    return migrateV2ToV3(raw, tiles, collision, fluids, objects);
-  }
 
   return ensureLevelGrids({
     format: LEVEL_FORMAT,
@@ -222,8 +140,8 @@ function objectToJson(object: LevelObject): Record<string, unknown> {
     y: object.y,
   };
   if (object.id) json.id = object.id;
-  if (object.width !== 48) json.width = object.width;
-  if (object.height !== 48) json.height = object.height;
+  if (object.width !== DEFAULT_PLAYER_WIDTH) json.width = object.width;
+  if (object.height !== DEFAULT_PLAYER_HEIGHT) json.height = object.height;
   if (object.vel_x !== 0) json.vx = object.vel_x;
   if (object.vel_y !== 0) json.vy = object.vel_y;
   return json;

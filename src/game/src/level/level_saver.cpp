@@ -32,10 +32,10 @@ namespace {
     if (!object.id.empty()) {
         json["id"] = object.id;
     }
-    if (object.width != 48.0f) {
+    if (object.width != 34.0f) {
         json["width"] = object.width;
     }
-    if (object.height != 48.0f) {
+    if (object.height != 52.0f) {
         json["height"] = object.height;
     }
     if (object.vel_x != 0.0f) {

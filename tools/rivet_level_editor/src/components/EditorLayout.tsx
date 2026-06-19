@@ -568,6 +568,26 @@ export function Inspector({
               />
             </label>
           </div>
+          <div className="field-row">
+            <label>
+              width
+              <input
+                type="number"
+                min={1}
+                value={selected.width}
+                onChange={(e) => onObjectPatch({ width: Number(e.target.value) })}
+              />
+            </label>
+            <label>
+              height
+              <input
+                type="number"
+                min={1}
+                value={selected.height}
+                onChange={(e) => onObjectPatch({ height: Number(e.target.value) })}
+              />
+            </label>
+          </div>
           <button type="button" className="danger-btn" onClick={onDeleteObject}>
             Delete object
           </button>

@@ -53,8 +53,8 @@ void SandboxGame::on_attach(rivet::core::GameContext& context) {
         context.service<rivet::physics::PhysicsWorld>().set_world_bounds({
             .min_x = 0.0f,
             .min_y = 0.0f,
-            .max_x = kWorldWidth - kSpriteSize,
-            .max_y = kWorldHeight - kSpriteSize,
+            .max_x = kWorldWidth,
+            .max_y = kWorldHeight,
             .enabled = true,
         });
     }

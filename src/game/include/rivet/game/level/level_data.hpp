@@ -12,8 +12,8 @@ struct LevelObject {
     std::string type;
     float x = 0.0f;
     float y = 0.0f;
-    float width = 48.0f;
-    float height = 48.0f;
+    float width = 34.0f;
+    float height = 52.0f;
     float vel_x = 0.0f;
     float vel_y = 0.0f;
 };

@@ -29,10 +29,10 @@ constexpr float kJumpSpeed = 360.0f;
 constexpr float kMaxFallSpeed = 1080.0f;
 constexpr float kJumpBufferTime = 0.12f;
 constexpr float kCoyoteTime = 0.1f;
-constexpr float kWaterGravity = 180.0f;
-constexpr float kWaterMaxFallSpeed = 216.0f;
-constexpr float kSwimSpeed = 144.0f;
-constexpr float kWaterDrag = 10.0f;
+constexpr float kWaterGravity = 72.0f;
+constexpr float kWaterMaxFallSpeed = 120.0f;
+constexpr float kSwimSpeed = 220.0f;
+constexpr float kWaterDrag = 14.0f;
 constexpr float kDefaultZoom = 2.0f;
 
 [[nodiscard]] float snap_world(const float value) {
@@ -98,19 +98,11 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
         physics.set_broadphase_cell_size(static_cast<float>(level_.grid_size));
 
         if (auto* scene = active_level(context)) {
-            float bounds_margin_x = 48.0f;
-            float bounds_margin_y = 48.0f;
-            if (scene->player_entity() != rivet::ecs::kNullEntity) {
-                const auto& collider = scene->world().registry().get<rivet::ecs::components::Collider>(
-                    scene->player_entity());
-                bounds_margin_x = collider.width;
-                bounds_margin_y = collider.height;
-            }
             physics.set_world_bounds({
                 .min_x = 0.0f,
                 .min_y = 0.0f,
-                .max_x = scene->world_width() - bounds_margin_x,
-                .max_y = scene->world_height() - bounds_margin_y,
+                .max_x = scene->world_width(),
+                .max_y = scene->world_height(),
                 .enabled = true,
             });
         }
@@ -265,22 +257,21 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
         const auto& collider = registry.get<rivet::ecs::components::Collider>(scene->player_entity());
 
         const auto fluid_sample = fluids_.sample_aabb(rivet::physics::make_aabb(transform, collider));
-        const bool in_water =
-            fluid_sample.immersed && fluid_sample.id == static_cast<std::uint8_t>(level::kFluidWater);
+        const bool in_fluid = fluid_sample.immersed && fluid_sample.id != 0;
+        const bool swim_up = context.input().is_key_down(rivet::input::Key::Space);
 
-        const float target_vx = context.input().state().move_x * kMoveSpeed;
+        const float target_vx = context.input().state().move_x * (in_fluid ? kSwimSpeed : kMoveSpeed);
         apply_horizontal_accel(velocity.x, target_vx, fixed_delta_time);
 
-        if (in_water) {
-            velocity.y += kWaterGravity * fixed_delta_time;
-            velocity.y = std::min(velocity.y, kWaterMaxFallSpeed);
+        if (in_fluid) {
+            if (swim_up) {
+                velocity.y = -kSwimSpeed;
+            } else {
+                velocity.y += kWaterGravity * fixed_delta_time;
+                velocity.y = std::min(velocity.y, kWaterMaxFallSpeed);
+            }
             apply_drag(velocity.x, kWaterDrag, fixed_delta_time);
             apply_drag(velocity.y, kWaterDrag, fixed_delta_time);
-
-            if (jump_buffer_time_ > 0.0f) {
-                velocity.y = -kSwimSpeed;
-                jump_buffer_time_ = 0.0f;
-            }
         } else {
             velocity.y += kGravity * fixed_delta_time;
             velocity.y = std::min(velocity.y, kMaxFallSpeed);
