@@ -134,6 +134,12 @@ function parseTileset(path: string, raw: Record<string, unknown>): TilesetDef | 
     console.warn(`[resourcepack] ${id}: texture not found (${textureName})`);
   }
 
+  const anchorRaw = raw.anchor != null ? String(raw.anchor) : undefined;
+  const anchor =
+    anchorRaw === "bottom-left" || anchorRaw === "center" || anchorRaw === "top-left"
+      ? anchorRaw
+      : undefined;
+
   return {
     id,
     name: String(raw.name ?? id),
@@ -142,6 +148,9 @@ function parseTileset(path: string, raw: Record<string, unknown>): TilesetDef | 
     tile_height: Number(raw.tile_height ?? 8),
     columns: Number(raw.columns ?? 8),
     rows: raw.rows != null ? Number(raw.rows) : undefined,
+    anchor,
+    offset_x: raw.offset_x != null ? Number(raw.offset_x) : undefined,
+    offset_y: raw.offset_y != null ? Number(raw.offset_y) : undefined,
   };
 }
 

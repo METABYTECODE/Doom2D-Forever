@@ -53,8 +53,8 @@ void spawn_object(
 
 LevelSpawnResult spawn_level(rivet::ecs::World& world, const LevelData& level) {
     LevelSpawnResult result;
-    result.world_width = static_cast<float>(level.width * level.grid_size);
-    result.world_height = static_cast<float>(level.height * level.grid_size);
+    result.world_width = static_cast<float>(level.width);
+    result.world_height = static_cast<float>(level.height);
 
     for (const auto& object : level.objects) {
         spawn_object(world, object, result.player, result.patrols);

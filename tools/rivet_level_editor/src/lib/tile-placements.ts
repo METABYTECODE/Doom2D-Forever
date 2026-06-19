@@ -1,143 +1,64 @@
 import type { PlacedTile } from "../types/level";
-import { GRID_SIZE } from "../types/level";
 import type { TilesetDef } from "../types/tileset";
-import { rectsOverlap, tileCellSpan } from "./tile-math";
+import { pointInRect, tileDestRect } from "./tile-render";
 
-export interface PlacementOccupancy {
-  placementIndex: number;
-}
+const ANCHOR_EPS = 0.5;
 
-export function buildOccupancy(
+/** Hit-test by visible sprite bounds (topmost wins). */
+export function findPlacementAtWorld(
   placements: PlacedTile[],
   tilesets: Map<string, TilesetDef>,
-  gridSize: number = GRID_SIZE,
-): (PlacementOccupancy | null)[][] {
-  const width = placements.reduce((max, tile) => {
-    const ts = tilesets.get(tile.tileset);
-    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
-    return Math.max(max, tile.x + span.w);
-  }, 0);
-  const height = placements.reduce((max, tile) => {
-    const ts = tilesets.get(tile.tileset);
-    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
-    return Math.max(max, tile.y + span.h);
-  }, 0);
-
-  const grid: (PlacementOccupancy | null)[][] = Array.from({ length: height }, () =>
-    Array<PlacementOccupancy | null>(width).fill(null),
-  );
-
-  placements.forEach((placement, placementIndex) => {
-    const ts = tilesets.get(placement.tileset);
-    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
-    for (let dy = 0; dy < span.h; dy++) {
-      for (let dx = 0; dx < span.w; dx++) {
-        const y = placement.y + dy;
-        const x = placement.x + dx;
-        if (!grid[y]) grid[y] = [];
-        grid[y][x] = { placementIndex };
-      }
-    }
-  });
-
-  return grid;
-}
-
-export function findPlacementAt(
-  placements: PlacedTile[],
-  tilesets: Map<string, TilesetDef>,
-  cellX: number,
-  cellY: number,
-  gridSize: number = GRID_SIZE,
+  worldX: number,
+  worldY: number,
 ): number {
   for (let i = placements.length - 1; i >= 0; i--) {
     const placement = placements[i];
-    const ts = tilesets.get(placement.tileset);
-    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
-    if (
-      cellX >= placement.x &&
-      cellY >= placement.y &&
-      cellX < placement.x + span.w &&
-      cellY < placement.y + span.h
-    ) {
+    const tileset = tilesets.get(placement.tileset);
+    if (!tileset) continue;
+    const rect = tileDestRect(placement.x, placement.y, tileset);
+    if (pointInRect(worldX, worldY, rect)) return i;
+  }
+  return -1;
+}
+
+/** Replace-on-paint: exact anchor match. */
+export function findPlacementAtAnchor(
+  placements: PlacedTile[],
+  anchorX: number,
+  anchorY: number,
+): number {
+  for (let i = placements.length - 1; i >= 0; i--) {
+    const p = placements[i];
+    if (Math.abs(p.x - anchorX) < ANCHOR_EPS && Math.abs(p.y - anchorY) < ANCHOR_EPS) {
       return i;
     }
   }
   return -1;
 }
 
-export function canPlaceTile(
+export function placeTilesAtPositions(
   placements: PlacedTile[],
-  tilesets: Map<string, TilesetDef>,
+  positions: Array<{ x: number; y: number }>,
   tilesetId: string,
   tileId: number,
-  cellX: number,
-  cellY: number,
-  mapWidth: number,
-  mapHeight: number,
-  ignoreIndex = -1,
-  gridSize: number = GRID_SIZE,
-): boolean {
-  const ts = tilesets.get(tilesetId);
-  if (!ts) return false;
-  const span = tileCellSpan(ts, gridSize);
-  if (cellX < 0 || cellY < 0 || cellX + span.w > mapWidth || cellY + span.h > mapHeight) {
-    return false;
+  mapWidthPx: number,
+  mapHeightPx: number,
+): PlacedTile[] {
+  const seen = new Set<string>();
+  const newOnes: PlacedTile[] = [];
+  for (const { x, y } of positions) {
+    if (x < 0 || y < 0 || x >= mapWidthPx || y >= mapHeightPx) continue;
+    const key = `${Math.round(x)}:${Math.round(y)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    newOnes.push({ tileset: tilesetId, id: tileId, x, y });
   }
+  if (newOnes.length === 0) return placements;
 
-  for (let i = 0; i < placements.length; i++) {
-    if (i === ignoreIndex) continue;
-    const other = placements[i];
-    const otherTs = tilesets.get(other.tileset);
-    const otherSpan = otherTs ? tileCellSpan(otherTs, gridSize) : { w: 1, h: 1 };
-    if (
-      rectsOverlap(
-        cellX,
-        cellY,
-        span.w,
-        span.h,
-        other.x,
-        other.y,
-        otherSpan.w,
-        otherSpan.h,
-      )
-    ) {
-      return false;
-    }
-  }
-
+  const replaceAnchors = new Set(newOnes.map((t) => `${Math.round(t.x)}:${Math.round(t.y)}`));
+  const kept = placements.filter(
+    (t) => !replaceAnchors.has(`${Math.round(t.x)}:${Math.round(t.y)}`),
+  );
   void tileId;
-  return true;
-}
-
-/** Remove placements whose footprint overlaps the given rect (optionally keeping some indices). */
-export function removeOverlappingPlacements(
-  placements: PlacedTile[],
-  tilesets: Map<string, TilesetDef>,
-  cellX: number,
-  cellY: number,
-  spanW: number,
-  spanH: number,
-  keepIndices: ReadonlySet<number> = new Set(),
-  gridSize: number = GRID_SIZE,
-): { tiles: PlacedTile[]; removed: Set<number> } {
-  const removed = new Set<number>();
-  const tiles = placements.filter((placement, index) => {
-    if (keepIndices.has(index)) return true;
-    const ts = tilesets.get(placement.tileset);
-    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
-    const overlaps = rectsOverlap(
-      cellX,
-      cellY,
-      spanW,
-      spanH,
-      placement.x,
-      placement.y,
-      span.w,
-      span.h,
-    );
-    if (overlaps) removed.add(index);
-    return !overlaps;
-  });
-  return { tiles, removed };
+  return [...kept, ...newOnes];
 }

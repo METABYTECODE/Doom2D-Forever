@@ -1,13 +1,13 @@
 {
   "format": "rivet-level",
-  "version": 2,
+  "version": 3,
   "name": "sample",
-  "grid_size": 8,
-  "width": 80,
-  "height": 60,
+  "grid_size": 16,
+  "width": 640,
+  "height": 480,
   "tiles": [
-    { "tileset": "example", "id": 0, "x": 12, "y": 14 },
-    { "tileset": "example", "id": 1, "x": 13, "y": 14 }
+    { "tileset": "example", "id": 0, "x": 96, "y": 112 },
+    { "tileset": "example", "id": 1, "x": 104, "y": 112 }
   ],
   "objects": [
     { "id": "player", "type": "player", "x": 96, "y": 96, "width": 40, "height": 40 }

@@ -23,7 +23,7 @@ struct TileFrame {
     int id = 0;
 };
 
-/// Graphics tile instance. Origin is in level grid cells (see grid_size).
+/// Graphics tile instance. Origin is in world pixels (anchor point).
 struct PlacedTile {
     std::string tileset;
     int id = 0;
@@ -54,10 +54,10 @@ struct PlacedTile {
 
 struct LevelData {
     static constexpr const char* kFormatId = "rivet-level";
-    static constexpr int kVersion = 2;
+    static constexpr int kVersion = 3;
 
     std::string name;
-    int grid_size = 8;
+    int grid_size = 16;
     int width = 0;
     int height = 0;
     std::string resource_pack = "dev";

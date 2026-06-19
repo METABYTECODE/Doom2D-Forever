@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 #include <stdexcept>
 
@@ -118,6 +119,9 @@ namespace {
         }
     }
 
+    level.width *= level.grid_size;
+    level.height *= level.grid_size;
+
     return level;
 }
 
@@ -180,6 +184,83 @@ namespace {
     return level;
 }
 
+[[nodiscard]] int sub_grid_cols(const int width_px, const int grid_size) {
+    return std::max(1, (width_px + grid_size - 1) / grid_size);
+}
+
+[[nodiscard]] int sub_grid_rows(const int height_px, const int grid_size) {
+    return std::max(1, (height_px + grid_size - 1) / grid_size);
+}
+
+[[nodiscard]] LevelData migrate_v2_to_v3(LevelData level) {
+    const int grid_size = level.grid_size > 0 ? level.grid_size : 8;
+    level.width *= grid_size;
+    level.height *= grid_size;
+    for (auto& tile : level.tiles) {
+        tile.x *= grid_size;
+        tile.y *= grid_size;
+    }
+    return level;
+}
+
+[[nodiscard]] LevelData load_level_v3(const nlohmann::json& json, const std::filesystem::path& path) {
+    LevelData level;
+    level.name = json.value("name", path.stem().string());
+    level.grid_size = json.value("grid_size", 8);
+    level.width = json.value("width", 0);
+    level.height = json.value("height", 0);
+    level.resource_pack = json.value("resource_pack", resources::kDefaultPackId);
+    level.background = json.value("background", "");
+    level.music = json.value("music", "");
+
+    if (json.contains("tiles")) {
+        for (const auto& tile_json : json.at("tiles")) {
+            level.tiles.push_back(parse_placed_tile(tile_json));
+        }
+    }
+
+    const int cols = sub_grid_cols(level.width, level.grid_size);
+    const int rows = sub_grid_rows(level.height, level.grid_size);
+
+    if (json.contains("collision")) {
+        level.collision = json.at("collision").get<std::vector<std::vector<int>>>();
+    } else {
+        level.collision = empty_collision_grid(cols, rows);
+    }
+
+    if (json.contains("fluids")) {
+        level.fluids = json.at("fluids").get<std::vector<std::vector<int>>>();
+    } else {
+        level.fluids = empty_fluids_grid(cols, rows);
+    }
+
+    if (static_cast<int>(level.collision.size()) != rows) {
+        throw std::runtime_error("Collision row count does not match level height: " + path.string());
+    }
+    for (const auto& row : level.collision) {
+        if (static_cast<int>(row.size()) != cols) {
+            throw std::runtime_error("Collision rows have inconsistent width: " + path.string());
+        }
+    }
+
+    if (static_cast<int>(level.fluids.size()) != rows) {
+        level.fluids = empty_fluids_grid(cols, rows);
+    }
+    for (const auto& row : level.fluids) {
+        if (static_cast<int>(row.size()) != cols) {
+            throw std::runtime_error("Fluids rows have inconsistent width: " + path.string());
+        }
+    }
+
+    if (json.contains("objects")) {
+        for (const auto& object_json : json.at("objects")) {
+            level.objects.push_back(parse_object(object_json));
+        }
+    }
+
+    return level;
+}
+
 } // namespace
 
 LevelData load_level(const std::filesystem::path& path) {
@@ -197,8 +278,11 @@ LevelData load_level(const std::filesystem::path& path) {
     if (version == 1) {
         return load_level_v1(json, path);
     }
+    if (version == 2) {
+        return migrate_v2_to_v3(load_level_v2(json, path));
+    }
     if (version == LevelData::kVersion) {
-        return load_level_v2(json, path);
+        return load_level_v3(json, path);
     }
 
     throw std::runtime_error("Unsupported level version in: " + path.string());

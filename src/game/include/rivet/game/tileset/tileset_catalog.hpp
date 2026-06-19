@@ -14,11 +14,21 @@ class ResourceManager;
 
 namespace rivet::game::tileset {
 
+enum class TileAnchor {
+    TopLeft,
+    BottomLeft,
+    Center,
+};
+
 struct TilesetDef {
     std::string id;
     int tile_width = 8;
     int tile_height = 8;
     int columns = 1;
+    TileAnchor anchor = TileAnchor::TopLeft;
+    int offset_x = 0;
+    int offset_y = 0;
+    bool has_explicit_offset = false;
     rivet::resources::TextureHandle texture = rivet::resources::kInvalidTexture;
 };
 
@@ -36,9 +46,13 @@ private:
     std::unordered_map<std::string, TilesetDef> tilesets_;
 };
 
-/// Grid cells occupied by a tile graphic (matches editor `tileCellSpan`).
-[[nodiscard]] int tile_cell_span(int tile_pixels, int grid_size);
-
+/// Source UV rect for a tile index in a uniform atlas grid.
 [[nodiscard]] rivet::render::Rect tile_source_rect(const TilesetDef& tileset, int tile_id);
+
+/// World-pixel destination for a placed tile anchor.
+[[nodiscard]] rivet::render::Rect tile_dest_rect(
+    const TilesetDef& tileset,
+    float anchor_x,
+    float anchor_y);
 
 } // namespace rivet::game::tileset

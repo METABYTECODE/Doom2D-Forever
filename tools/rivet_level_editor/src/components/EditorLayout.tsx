@@ -326,6 +326,7 @@ interface InspectorProps {
   onDeletePlacement: () => void;
   onAddFrame: () => void;
   onSnapGridChange: (v: boolean) => void;
+  onGridSizeChange: (gridSize: number) => void;
 }
 
 export function Inspector({
@@ -347,14 +348,20 @@ export function Inspector({
   onDeletePlacement,
   onAddFrame,
   onSnapGridChange,
+  onGridSizeChange,
 }: InspectorProps) {
   const [draftW, setDraftW] = useState(level.width);
   const [draftH, setDraftH] = useState(level.height);
+  const [draftGrid, setDraftGrid] = useState(level.grid_size);
 
   useEffect(() => {
     setDraftW(level.width);
     setDraftH(level.height);
   }, [level.width, level.height]);
+
+  useEffect(() => {
+    setDraftGrid(level.grid_size);
+  }, [level.grid_size]);
 
   const placement = selectedPlacement >= 0 ? level.tiles[selectedPlacement] : null;
   const frames = placement ? getPlacementFrames(placement) : [];
@@ -372,8 +379,8 @@ export function Inspector({
             W
             <input
               type="number"
-              min={4}
-              max={512}
+              min={64}
+              max={8192}
               value={draftW}
               onChange={(e) => setDraftW(Number(e.target.value))}
               onBlur={() => onResizeMap(draftW, draftH)}
@@ -383,8 +390,8 @@ export function Inspector({
             H
             <input
               type="number"
-              min={4}
-              max={512}
+              min={64}
+              max={8192}
               value={draftH}
               onChange={(e) => setDraftH(Number(e.target.value))}
               onBlur={() => onResizeMap(draftW, draftH)}
@@ -392,7 +399,7 @@ export function Inspector({
           </label>
         </div>
         <p className="hint mono">
-          {level.width}×{level.height} cells · {level.width * level.grid_size}px wide
+          {level.width}×{level.height} px · snap {level.grid_size}px
         </p>
         <p className="hint">
           Resource pack: <span className="mono">{level.resource_pack || "dev"}</span>
@@ -421,7 +428,22 @@ export function Inspector({
             checked={snapGrid}
             onChange={(e) => onSnapGridChange(e.target.checked)}
           />
-          Snap objects to grid
+          Snap to grid
+        </label>
+        <label>
+          Grid step (px)
+          <input
+            type="number"
+            min={1}
+            max={128}
+            step={1}
+            value={draftGrid}
+            onChange={(e) => setDraftGrid(Number(e.target.value))}
+            onBlur={() => onGridSizeChange(draftGrid)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") onGridSizeChange(draftGrid);
+            }}
+          />
         </label>
       </section>
 

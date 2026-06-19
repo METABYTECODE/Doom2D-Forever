@@ -1,5 +1,7 @@
 import {
   DEFAULT_FRAME_MS,
+  DEFAULT_MAP_HEIGHT_PX,
+  DEFAULT_MAP_WIDTH_PX,
   GRID_SIZE,
   LEVEL_FORMAT,
   LEVEL_VERSION,
@@ -11,24 +13,30 @@ import {
 import { DEFAULT_PACK_ID } from "./resource-pack";
 import { emptyCollision, paintCollisionBorder } from "./level-collision";
 import { emptyFluids } from "./level-fluids";
-import { ensureLevelGrids, resizeLevel } from "./level-grids";
+import { ensureLevelGrids, resizeLevel, setGridSize } from "./level-grids";
+import { subGridCols, subGridRows } from "./sub-grid";
 
-export { ensureLevelGrids, resizeLevel };
+export { ensureLevelGrids, resizeLevel, setGridSize };
 
-export function createBlankLevel(width = 80, height = 60): LevelData {
+export function createBlankLevel(
+  widthPx = DEFAULT_MAP_WIDTH_PX,
+  heightPx = DEFAULT_MAP_HEIGHT_PX,
+): LevelData {
+  const cols = subGridCols(widthPx, GRID_SIZE);
+  const rows = subGridRows(heightPx, GRID_SIZE);
   const level: LevelData = {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: "untitled",
     grid_size: GRID_SIZE,
-    width,
-    height,
+    width: widthPx,
+    height: heightPx,
     resource_pack: DEFAULT_PACK_ID,
     background: "",
     music: "",
     tiles: [],
-    collision: emptyCollision(width, height),
-    fluids: emptyFluids(width, height),
+    collision: emptyCollision(cols, rows),
+    fluids: emptyFluids(cols, rows),
     objects: [],
   };
   return paintCollisionBorder(level);
@@ -70,9 +78,43 @@ function parseObject(raw: Record<string, unknown>, index: number): LevelObject {
   };
 }
 
+function migrateV2ToV3(
+  raw: Record<string, unknown>,
+  tiles: PlacedTile[],
+  collision: number[][],
+  fluids: number[][],
+  objects: LevelObject[],
+): LevelData {
+  const gridSize = Number(raw.grid_size ?? GRID_SIZE);
+  const widthPx = Number(raw.width ?? 0) * gridSize;
+  const heightPx = Number(raw.height ?? 0) * gridSize;
+  const migratedTiles = tiles.map((tile) => ({
+    ...tile,
+    x: tile.x * gridSize,
+    y: tile.y * gridSize,
+  }));
+
+  return ensureLevelGrids({
+    format: LEVEL_FORMAT,
+    version: LEVEL_VERSION,
+    name: String(raw.name ?? "level"),
+    grid_size: gridSize,
+    width: widthPx,
+    height: heightPx,
+    resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),
+    background: String(raw.background ?? ""),
+    music: String(raw.music ?? ""),
+    tiles: migratedTiles,
+    collision,
+    fluids,
+    objects,
+  });
+}
+
 function convertLegacyLevel(raw: Record<string, unknown>): LevelData {
   const legacyTileSize = Number(raw.tile_size ?? 32);
-  const scale = legacyTileSize / GRID_SIZE;
+  const gridSize = GRID_SIZE;
+  const scale = legacyTileSize / gridSize;
   if (!Number.isInteger(scale) || scale < 1) {
     throw new Error("Legacy tile_size must be a multiple of 8");
   }
@@ -80,9 +122,11 @@ function convertLegacyLevel(raw: Record<string, unknown>): LevelData {
   const legacyTiles = raw.tiles as number[][];
   const legacyWidth = Number(raw.width ?? legacyTiles[0]?.length ?? 0);
   const legacyHeight = Number(raw.height ?? legacyTiles.length ?? 0);
-  const width = legacyWidth * scale;
-  const height = legacyHeight * scale;
-  const collision = emptyCollision(width, height);
+  const cols = legacyWidth * scale;
+  const rows = legacyHeight * scale;
+  const widthPx = cols * gridSize;
+  const heightPx = rows * gridSize;
+  const collision = emptyCollision(cols, rows);
 
   for (let y = 0; y < legacyHeight; y++) {
     for (let x = 0; x < legacyWidth; x++) {
@@ -103,15 +147,15 @@ function convertLegacyLevel(raw: Record<string, unknown>): LevelData {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: String(raw.name ?? "level"),
-    grid_size: GRID_SIZE,
-    width,
-    height,
+    grid_size: gridSize,
+    width: widthPx,
+    height: heightPx,
     resource_pack: DEFAULT_PACK_ID,
     background: "",
     music: "",
     tiles: [],
     collision,
-    fluids: emptyFluids(width, height),
+    fluids: emptyFluids(cols, rows),
     objects,
   });
 }
@@ -126,10 +170,11 @@ export function parseLevelJson(text: string): LevelData {
   if (version === 1) {
     return convertLegacyLevel(raw);
   }
-  if (version !== LEVEL_VERSION) {
+  if (version !== 2 && version !== LEVEL_VERSION) {
     throw new Error(`Unsupported version: ${String(raw.version)}`);
   }
 
+  const gridSize = Number(raw.grid_size ?? GRID_SIZE);
   const width = Number(raw.width ?? 0);
   const height = Number(raw.height ?? 0);
 
@@ -139,21 +184,25 @@ export function parseLevelJson(text: string): LevelData {
 
   const collision = Array.isArray(raw.collision)
     ? (raw.collision as number[][])
-    : emptyCollision(width, height);
+    : emptyCollision(subGridCols(width * (version === 2 ? gridSize : 1), gridSize), subGridRows(height * (version === 2 ? gridSize : 1), gridSize));
 
   const fluids = Array.isArray(raw.fluids)
     ? (raw.fluids as number[][])
-    : emptyFluids(width, height);
+    : emptyFluids(subGridCols(width * (version === 2 ? gridSize : 1), gridSize), subGridRows(height * (version === 2 ? gridSize : 1), gridSize));
 
   const objects = Array.isArray(raw.objects)
     ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
     : [];
 
+  if (version === 2) {
+    return migrateV2ToV3(raw, tiles, collision, fluids, objects);
+  }
+
   return ensureLevelGrids({
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: String(raw.name ?? "level"),
-    grid_size: Number(raw.grid_size ?? GRID_SIZE),
+    grid_size: gridSize,
     width,
     height,
     resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),

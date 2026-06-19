@@ -33,12 +33,6 @@ TEST_CASE("ResourcePack loads dev pack from assets", "[game][resources]") {
     CHECK(std::filesystem::exists(pack->tilesets_dir()));
 }
 
-TEST_CASE("tile_cell_span matches editor footprint for 36px tiles", "[game][tileset]") {
-    CHECK(rivet::game::tileset::tile_cell_span(36, 8) == 5);
-    CHECK(rivet::game::tileset::tile_cell_span(16, 8) == 2);
-    CHECK(rivet::game::tileset::tile_cell_span(8, 8) == 1);
-}
-
 TEST_CASE("Level loader reads rivet-level JSON", "[game][level]") {
     const auto level_path = source_path("assets/levels/test.level.json");
     if (!std::filesystem::exists(level_path)) {

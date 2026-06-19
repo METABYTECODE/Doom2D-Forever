@@ -1,6 +1,8 @@
 export const LEVEL_FORMAT = "rivet-level" as const;
-export const LEVEL_VERSION = 2;
-export const GRID_SIZE = 8;
+export const LEVEL_VERSION = 3;
+export const GRID_SIZE = 16;
+export const DEFAULT_MAP_WIDTH_PX = 640;
+export const DEFAULT_MAP_HEIGHT_PX = 480;
 
 export interface LevelObject {
   id: string;
@@ -18,6 +20,10 @@ export interface TileFrame {
   id: number;
 }
 
+/**
+ * Tile placement in world pixels (anchor point).
+ * Sprite size comes from tileset; see tile-render.ts.
+ */
 export interface PlacedTile {
   tileset: string;
   id: number;
@@ -46,7 +52,9 @@ export interface LevelData {
   format: typeof LEVEL_FORMAT;
   version: typeof LEVEL_VERSION;
   name: string;
+  /** Snap overlay + collision/fluids sub-grid step (px). */
   grid_size: number;
+  /** Level bounds in world pixels. */
   width: number;
   height: number;
   resource_pack: string;

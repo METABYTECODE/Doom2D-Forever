@@ -334,19 +334,16 @@ void LevelGame::draw_level_tiles(
     for (const auto& tile : data.tiles) {
         const auto frame = level::tile_frame_at_time(tile, animation_time);
         const tileset::TilesetDef* def = tilesets_ ? tilesets_->find(frame.tileset) : nullptr;
-        const tileset::TilesetDef* footprint_def =
-            def != nullptr ? def : (tilesets_ ? tilesets_->find(tile.tileset) : nullptr);
-        const int footprint_w =
-            footprint_def ? tileset::tile_cell_span(footprint_def->tile_width, data.grid_size) : 1;
-        const int footprint_h =
-            footprint_def ? tileset::tile_cell_span(footprint_def->tile_height, data.grid_size) : 1;
 
-        const rivet::render::Rect dest{
-            .x = static_cast<float>(tile.x) * cell_size,
-            .y = static_cast<float>(tile.y) * cell_size,
-            .width = static_cast<float>(footprint_w) * cell_size,
-            .height = static_cast<float>(footprint_h) * cell_size,
-        };
+        const rivet::render::Rect dest =
+            def != nullptr
+                ? tileset::tile_dest_rect(*def, static_cast<float>(tile.x), static_cast<float>(tile.y))
+                : rivet::render::Rect{
+                      .x = static_cast<float>(tile.x),
+                      .y = static_cast<float>(tile.y),
+                      .width = cell_size,
+                      .height = cell_size,
+                  };
 
         if (def != nullptr && def->texture != rivet::resources::kInvalidTexture) {
             renderer.draw_texture(

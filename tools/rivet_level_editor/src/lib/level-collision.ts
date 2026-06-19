@@ -1,74 +1,62 @@
 import type { LevelData } from "../types/level";
-import { GRID_SIZE } from "../types/level";
+import { subGridCols, subGridRows, snapGridSize } from "./sub-grid";
 
-export function clampMapSize(value: number): number {
-  if (!Number.isFinite(value)) return 4;
-  return Math.min(512, Math.max(4, Math.round(value)));
+export function clampMapSizePx(value: number): number {
+  if (!Number.isFinite(value)) return 64;
+  return Math.min(8192, Math.max(64, Math.round(value)));
 }
 
-export function emptyCollision(width: number, height: number): number[][] {
-  return Array.from({ length: height }, () => Array<number>(width).fill(0));
+export function emptyCollision(cols: number, rows: number): number[][] {
+  return Array.from({ length: rows }, () => Array<number>(cols).fill(0));
 }
 
-/** Keeps collision grid dimensions in sync with width/height metadata. */
+/** Collision sub-grid matches level px bounds at grid_size resolution. */
 export function ensureLevelCollision(level: LevelData): LevelData {
-  const width = clampMapSize(level.width);
-  const height = clampMapSize(level.height);
+  const gridSize = snapGridSize(level);
+  const widthPx = clampMapSizePx(level.width);
+  const heightPx = clampMapSizePx(level.height);
+  const cols = subGridCols(widthPx, gridSize);
+  const rows = subGridRows(heightPx, gridSize);
 
   if (
-    level.collision.length === height &&
-    level.collision.every((row) => row.length === width)
+    level.collision.length === rows &&
+    level.collision.every((row) => row.length === cols) &&
+    level.width === widthPx &&
+    level.height === heightPx
   ) {
-    if (level.width === width && level.height === height) {
-      return level;
-    }
-    return { ...level, width, height };
+    return level;
   }
 
-  const collision = Array.from({ length: height }, (_, y) =>
-    Array.from({ length: width }, (_, x) => level.collision[y]?.[x] ?? 0),
+  const collision = Array.from({ length: rows }, (_, y) =>
+    Array.from({ length: cols }, (_, x) => level.collision[y]?.[x] ?? 0),
   );
 
-  return { ...level, width, height, collision };
-}
-
-export function resizeLevel(level: LevelData, width: number, height: number): LevelData {
-  const nextWidth = clampMapSize(width);
-  const nextHeight = clampMapSize(height);
-
-  const tiles = level.tiles.filter((tile) => tile.x < nextWidth && tile.y < nextHeight);
-
-  const collision = Array.from({ length: nextHeight }, (_, y) =>
-    Array.from({ length: nextWidth }, (_, x) => level.collision[y]?.[x] ?? 0),
-  );
-
-  return ensureLevelCollision({
-    ...level,
-    width: nextWidth,
-    height: nextHeight,
-    tiles,
-    collision,
-  });
+  return { ...level, width: widthPx, height: heightPx, collision };
 }
 
 export function paintCollisionBorder(level: LevelData): LevelData {
+  const { cols, rows } = {
+    cols: subGridCols(level.width, snapGridSize(level)),
+    rows: subGridRows(level.height, snapGridSize(level)),
+  };
   const collision = level.collision.map((row) => [...row]);
-  for (let x = 0; x < level.width; x++) {
+  for (let x = 0; x < cols; x++) {
     collision[0][x] = 1;
-    collision[level.height - 1][x] = 1;
+    collision[rows - 1][x] = 1;
   }
-  for (let y = 1; y < level.height - 1; y++) {
+  for (let y = 1; y < rows - 1; y++) {
     collision[y][0] = 1;
-    collision[y][level.width - 1] = 1;
+    collision[y][cols - 1] = 1;
   }
   return { ...level, collision };
 }
 
+/** @deprecated use snapGridSize from sub-grid */
 export function worldCellSize(level: LevelData): number {
-  return level.grid_size || GRID_SIZE;
+  return snapGridSize(level);
 }
 
-/** Grid cells along a line (Bresenham), inclusive of both endpoints. */
+/** Sub-grid cells along a line (Bresenham). */
 export function gridLineCells(
   x0: number,
   y0: number,
@@ -105,12 +93,12 @@ export function paintCollisionCells(
   collision: number[][],
   cells: Array<{ x: number; y: number }>,
   value: number,
-  width: number,
-  height: number,
+  cols: number,
+  rows: number,
 ): boolean {
   let changed = false;
   for (const { x, y } of cells) {
-    if (x < 0 || y < 0 || x >= width || y >= height) continue;
+    if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
     if ((collision[y]?.[x] ?? 0) === value) continue;
     collision[y][x] = value;
     changed = true;

@@ -1,28 +1,32 @@
 import { FLUID_NONE, LEVEL_FORMAT, LEVEL_VERSION, type LevelData } from "../types/level";
+import { subGridCols, subGridRows, snapGridSize } from "./sub-grid";
 
 export function validateLevel(level: LevelData): string[] {
   const errors: string[] = [];
+  const gridSize = snapGridSize(level);
+  const cols = subGridCols(level.width, gridSize);
+  const rows = subGridRows(level.height, gridSize);
 
   if (level.format !== LEVEL_FORMAT) errors.push("Invalid format id");
   if (level.version !== LEVEL_VERSION) errors.push("Unsupported version");
   if (!level.name.trim()) errors.push("Level name is empty");
   if (level.grid_size < 1) errors.push("grid_size must be positive");
   if (level.width < 1 || level.height < 1) errors.push("Map size must be positive");
-  if (level.collision.length !== level.height) {
-    errors.push(`Collision rows (${level.collision.length}) != height (${level.height})`);
+  if (level.collision.length !== rows) {
+    errors.push(`Collision rows (${level.collision.length}) != sub-grid rows (${rows})`);
   }
   for (let y = 0; y < level.collision.length; y++) {
-    if (level.collision[y].length !== level.width) {
-      errors.push(`Collision row ${y} width mismatch`);
+    if (level.collision[y].length !== cols) {
+      errors.push(`Collision row ${y} width mismatch (expected ${cols})`);
       break;
     }
   }
-  if (level.fluids.length !== level.height) {
-    errors.push(`Fluids rows (${level.fluids.length}) != height (${level.height})`);
+  if (level.fluids.length !== rows) {
+    errors.push(`Fluids rows (${level.fluids.length}) != sub-grid rows (${rows})`);
   }
   for (let y = 0; y < level.fluids.length; y++) {
-    if (level.fluids[y].length !== level.width) {
-      errors.push(`Fluids row ${y} width mismatch`);
+    if (level.fluids[y].length !== cols) {
+      errors.push(`Fluids row ${y} width mismatch (expected ${cols})`);
       break;
     }
     for (let x = 0; x < level.fluids[y].length; x++) {

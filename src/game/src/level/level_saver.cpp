@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <fstream>
 #include <stdexcept>
 
@@ -65,11 +66,13 @@ namespace {
 }
 
 [[nodiscard]] bool fluids_grid_matches(const LevelData& level) {
-    if (static_cast<int>(level.fluids.size()) != level.height) {
+    const int cols = std::max(1, (level.width + level.grid_size - 1) / level.grid_size);
+    const int rows = std::max(1, (level.height + level.grid_size - 1) / level.grid_size);
+    if (static_cast<int>(level.fluids.size()) != rows) {
         return false;
     }
     for (const auto& row : level.fluids) {
-        if (static_cast<int>(row.size()) != level.width) {
+        if (static_cast<int>(row.size()) != cols) {
             return false;
         }
     }
@@ -82,8 +85,15 @@ void save_level(const std::filesystem::path& path, const LevelData& level) {
     if (level.width <= 0 || level.height <= 0) {
         throw std::runtime_error("Cannot save level with non-positive dimensions");
     }
-    if (static_cast<int>(level.collision.size()) != level.height) {
-        throw std::runtime_error("Level collision row count does not match height");
+    const int cols = std::max(1, (level.width + level.grid_size - 1) / level.grid_size);
+    const int rows = std::max(1, (level.height + level.grid_size - 1) / level.grid_size);
+    if (static_cast<int>(level.collision.size()) != rows) {
+        throw std::runtime_error("Level collision row count does not match sub-grid height");
+    }
+    for (const auto& row : level.collision) {
+        if (static_cast<int>(row.size()) != cols) {
+            throw std::runtime_error("Level collision row width does not match sub-grid width");
+        }
     }
 
     nlohmann::json json = {

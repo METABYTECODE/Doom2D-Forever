@@ -1,42 +1,45 @@
 import type { LevelData } from "../types/level";
 import { FLUID_NONE, type FluidId } from "../types/level";
-import { clampMapSize } from "./level-collision";
+import { clampMapSizePx } from "./level-collision";
+import { subGridCols, subGridRows, snapGridSize } from "./sub-grid";
 
-export function emptyFluids(width: number, height: number): number[][] {
-  return Array.from({ length: height }, () => Array<number>(width).fill(FLUID_NONE));
+export function emptyFluids(cols: number, rows: number): number[][] {
+  return Array.from({ length: rows }, () => Array<number>(cols).fill(FLUID_NONE));
 }
 
 export function ensureLevelFluids(level: LevelData): LevelData {
-  const width = clampMapSize(level.width);
-  const height = clampMapSize(level.height);
+  const gridSize = snapGridSize(level);
+  const widthPx = clampMapSizePx(level.width);
+  const heightPx = clampMapSizePx(level.height);
+  const cols = subGridCols(widthPx, gridSize);
+  const rows = subGridRows(heightPx, gridSize);
 
   if (
-    level.fluids.length === height &&
-    level.fluids.every((row) => row.length === width)
+    level.fluids.length === rows &&
+    level.fluids.every((row) => row.length === cols) &&
+    level.width === widthPx &&
+    level.height === heightPx
   ) {
-    if (level.width === width && level.height === height) {
-      return level;
-    }
-    return { ...level, width, height };
+    return level;
   }
 
-  const fluids = Array.from({ length: height }, (_, y) =>
-    Array.from({ length: width }, (_, x) => level.fluids[y]?.[x] ?? FLUID_NONE),
+  const fluids = Array.from({ length: rows }, (_, y) =>
+    Array.from({ length: cols }, (_, x) => level.fluids[y]?.[x] ?? FLUID_NONE),
   );
 
-  return { ...level, width, height, fluids };
+  return { ...level, width: widthPx, height: heightPx, fluids };
 }
 
 export function paintFluidCells(
   fluids: number[][],
   cells: Array<{ x: number; y: number }>,
   value: FluidId,
-  width: number,
-  height: number,
+  cols: number,
+  rows: number,
 ): boolean {
   let changed = false;
   for (const { x, y } of cells) {
-    if (x < 0 || y < 0 || x >= width || y >= height) continue;
+    if (x < 0 || y < 0 || x >= cols || y >= rows) continue;
     if ((fluids[y]?.[x] ?? FLUID_NONE) === value) continue;
     fluids[y][x] = value;
     changed = true;

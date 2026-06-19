@@ -26,16 +26,16 @@ export function brushCells(
 }
 
 export function strokeBrushCells(
-  strokeFrom: { tx: number; ty: number } | undefined,
-  tx: number,
-  ty: number,
+  strokeFrom: { x: number; y: number } | undefined,
+  cellX: number,
+  cellY: number,
   brushSize: number,
   mapWidth: number,
   mapHeight: number,
 ): Array<{ x: number; y: number }> {
   const anchors = strokeFrom
-    ? gridLineCells(strokeFrom.tx, strokeFrom.ty, tx, ty)
-    : [{ x: tx, y: ty }];
+    ? gridLineCells(strokeFrom.x, strokeFrom.y, cellX, cellY)
+    : [{ x: cellX, y: cellY }];
 
   const seen = new Set<string>();
   const cells: Array<{ x: number; y: number }> = [];
