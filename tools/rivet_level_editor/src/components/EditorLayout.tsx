@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { DEFAULT_FRAME_MS, type PlacedTile } from "../types/level";
 import type {
-  CollisionTool,
   EditorMode,
-  FluidTool,
+  FluidPaint,
+  GridTool,
   LevelData,
   LevelObject,
   ObjectTool,
   PaintFluidOption,
-  TileTool,
 } from "../types/level";
 import { isAnimatedPlacement, placementFrames as getPlacementFrames } from "../lib/tile-animation";
 import { clampBrushSize } from "../lib/brush";
@@ -77,70 +76,10 @@ export function MenuBar({
 
 interface ToolRailProps {
   mode: EditorMode;
-  tileTool: TileTool;
-  collisionTool: CollisionTool;
-  fluidTool: FluidTool;
-  objectTool: ObjectTool;
   onModeChange: (mode: EditorMode) => void;
-  onTileToolChange: (tool: TileTool) => void;
-  onCollisionToolChange: (tool: CollisionTool) => void;
-  onFluidToolChange: (tool: FluidTool) => void;
-  onObjectToolChange: (tool: ObjectTool) => void;
 }
 
-export function ToolRail({
-  mode,
-  tileTool,
-  collisionTool,
-  fluidTool,
-  objectTool,
-  onModeChange,
-  onTileToolChange,
-  onCollisionToolChange,
-  onFluidToolChange,
-  onObjectToolChange,
-}: ToolRailProps) {
-  const subTool =
-    mode === "tiles"
-      ? tileTool
-      : mode === "collision"
-        ? collisionTool
-        : mode === "fluids"
-          ? fluidTool
-          : objectTool;
-
-  const setSubTool = (id: string) => {
-    if (mode === "tiles") onTileToolChange(id as TileTool);
-    else if (mode === "collision") onCollisionToolChange(id as CollisionTool);
-    else if (mode === "fluids") onFluidToolChange(id as FluidTool);
-    else onObjectToolChange(id as ObjectTool);
-  };
-
-  const subTools =
-    mode === "tiles"
-      ? [
-          { id: "paint", label: "Brush", icon: "▣" },
-          { id: "erase", label: "Erase", icon: "◇" },
-          { id: "select", label: "Select", icon: "↖" },
-        ]
-      : mode === "collision"
-        ? [
-            { id: "paint", label: "Solid", icon: "■" },
-            { id: "erase", label: "Clear", icon: "□" },
-          ]
-        : mode === "fluids"
-          ? [
-              { id: "water", label: "Water", icon: "≈" },
-              { id: "acid", label: "Acid", icon: "☣" },
-              { id: "lava", label: "Lava", icon: "♨" },
-              { id: "erase", label: "Clear", icon: "□" },
-            ]
-          : [
-              { id: "select", label: "Select", icon: "↖" },
-              { id: "place-player", label: "Player", icon: "P" },
-              { id: "place-block", label: "Block", icon: "B" },
-            ];
-
+export function ToolRail({ mode, onModeChange }: ToolRailProps) {
   return (
     <aside className="tool-rail">
       <div className="tool-rail-modes">
@@ -181,59 +120,119 @@ export function ToolRail({
           <span>Objects</span>
         </button>
       </div>
-      <div className="tool-rail-sep" />
-      <div className="tool-rail-sub">
-        {subTools.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            className={subTool === t.id ? "active" : ""}
-            title={t.label}
-            onClick={() => setSubTool(t.id)}
-          >
-            <span className="tool-icon">{t.icon}</span>
-          </button>
-        ))}
-      </div>
     </aside>
   );
 }
 
+const GRID_TOOLS: Array<{ id: GridTool; label: string }> = [
+  { id: "select", label: "Select" },
+  { id: "paint", label: "Brush" },
+  { id: "line", label: "Line" },
+  { id: "fill", label: "Fill" },
+  { id: "erase", label: "Erase" },
+];
+
+const OBJECT_TOOLS: Array<{ id: ObjectTool; label: string }> = [
+  { id: "select", label: "Select" },
+  { id: "place-player", label: "Player" },
+  { id: "place-block", label: "Block" },
+];
+
 interface OptionsBarProps {
   mode: EditorMode;
+  gridTool: GridTool;
+  objectTool: ObjectTool;
+  fluidPaint: FluidPaint;
   brushSize: number;
+  onGridToolChange: (tool: GridTool) => void;
+  onObjectToolChange: (tool: ObjectTool) => void;
+  onFluidPaintChange: (paint: FluidPaint) => void;
   onBrushSizeChange: (size: number) => void;
 }
 
-export function OptionsBar({ mode, brushSize, onBrushSizeChange }: OptionsBarProps) {
-  if (mode !== "collision" && mode !== "fluids") {
-    return null;
-  }
-
+export function OptionsBar({
+  mode,
+  gridTool,
+  objectTool,
+  fluidPaint,
+  brushSize,
+  onGridToolChange,
+  onObjectToolChange,
+  onFluidPaintChange,
+  onBrushSizeChange,
+}: OptionsBarProps) {
   const size = clampBrushSize(brushSize);
+  const showBrushSize =
+    mode === "collision" || mode === "fluids" || (mode === "tiles" && gridTool === "erase");
 
   return (
     <div className="options-bar">
-      <label className="options-field">
-        <span>Brush size</span>
-        <input
-          type="range"
-          min={1}
-          max={16}
-          value={size}
-          onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
-        />
-        <input
-          type="number"
-          min={1}
-          max={16}
-          value={size}
-          onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
-        />
-      </label>
-      <span className="options-hint">
-        {size}×{size} cells
-      </span>
+      {mode === "objects" ? (
+        <div className="options-tools">
+          {OBJECT_TOOLS.map((tool) => (
+            <button
+              key={tool.id}
+              type="button"
+              className={objectTool === tool.id ? "active" : ""}
+              onClick={() => onObjectToolChange(tool.id)}
+            >
+              {tool.label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <>
+          <div className="options-tools">
+            {GRID_TOOLS.map((tool) => (
+              <button
+                key={tool.id}
+                type="button"
+                className={gridTool === tool.id ? "active" : ""}
+                onClick={() => onGridToolChange(tool.id)}
+              >
+                {tool.label}
+              </button>
+            ))}
+          </div>
+          {mode === "fluids" && gridTool !== "erase" && (
+            <label className="options-field">
+              <span>Type</span>
+              <select
+                value={fluidPaint}
+                onChange={(e) => onFluidPaintChange(e.target.value as FluidPaint)}
+              >
+                <option value="water">Water</option>
+                <option value="acid">Acid</option>
+                <option value="lava">Lava</option>
+              </select>
+            </label>
+          )}
+        </>
+      )}
+
+      {showBrushSize && (
+        <>
+          <span className="options-sep" />
+          <label className="options-field">
+            <span>Size</span>
+            <input
+              type="range"
+              min={1}
+              max={16}
+              value={size}
+              onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
+            />
+            <input
+              type="number"
+              min={1}
+              max={16}
+              value={size}
+              onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
+            />
+          </label>
+          <span className="options-hint">{size}×{size}</span>
+        </>
+      )}
     </div>
   );
 }
@@ -313,6 +312,7 @@ interface InspectorProps {
   mode: EditorMode;
   selected: LevelObject | null;
   selectedPlacement: number;
+  selectedPlacementCount: number;
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
   backgroundAssets: PackAsset[];
@@ -333,6 +333,7 @@ export function Inspector({
   mode,
   selected,
   selectedPlacement,
+  selectedPlacementCount,
   tilesets,
   tilesetImages,
   backgroundAssets,
@@ -424,81 +425,91 @@ export function Inspector({
         </label>
       </section>
 
-      {mode === "tiles" && placement && (
+      {mode === "tiles" && (placement || selectedPlacementCount > 0) && (
         <section className="inspector-section">
-          <h3>Selected tile</h3>
-          <p className="mono">
-            {placement.tileset}:{placement.id} @ {placement.x},{placement.y}
-          </p>
+          <h3>Selected tile{selectedPlacementCount > 1 ? "s" : ""}</h3>
+          {selectedPlacementCount > 1 ? (
+            <p className="hint">{selectedPlacementCount} tiles selected · drag to move</p>
+          ) : placement ? (
+            <p className="mono">
+              {placement.tileset}:{placement.id} @ {placement.x},{placement.y}
+            </p>
+          ) : null}
 
-          <div className="frame-list-header">
-            <h4>Animation frames</h4>
-            <button type="button" className="accent-btn" onClick={onAddFrame}>
-              + Add frame
-            </button>
-          </div>
+          {placement && (
+            <>
+              <div className="frame-list-header">
+                <h4>Animation frames</h4>
+                <button type="button" className="accent-btn" onClick={onAddFrame}>
+                  + Add frame
+                </button>
+              </div>
 
-          {isAnimatedPlacement(placement) && (
-            <label>
-              Frame duration (ms)
-              <input
-                type="number"
-                min={40}
-                max={2000}
-                step={10}
-                value={placement.frame_ms ?? DEFAULT_FRAME_MS}
-                onChange={(e) =>
-                  onUpdatePlacement(selectedPlacement, {
-                    frame_ms: Number(e.target.value),
-                  })
-                }
-              />
-            </label>
+              {isAnimatedPlacement(placement) && (
+                <label>
+                  Frame duration (ms)
+                  <input
+                    type="number"
+                    min={40}
+                    max={2000}
+                    step={10}
+                    value={placement.frame_ms ?? DEFAULT_FRAME_MS}
+                    onChange={(e) =>
+                      onUpdatePlacement(selectedPlacement, {
+                        frame_ms: Number(e.target.value),
+                      })
+                    }
+                  />
+                </label>
+              )}
+
+              <ul className="frame-list">
+                {frames.map((frame, index) => {
+                  const frameTileset = tilesets.get(frame.tileset) ?? null;
+                  const frameImage = tilesetImages.get(frame.tileset) ?? null;
+                  return (
+                    <li key={`${index}-${frame.tileset}-${frame.id}`} className="frame-list-item">
+                      <TilePreview
+                        tileset={frameTileset}
+                        image={frameImage}
+                        tileId={frame.id}
+                        size={36}
+                        className="frame-preview-canvas"
+                      />
+                      <div className="frame-list-meta">
+                        <span className="mono">
+                          #{index} {frame.tileset}:{frame.id}
+                        </span>
+                        {index === 0 && <span className="hint">primary</span>}
+                      </div>
+                      {index > 0 && (
+                        <button
+                          type="button"
+                          className="frame-remove-btn"
+                          title="Remove frame"
+                          onClick={() => {
+                            const nextFrames = frames.filter((_, i) => i !== index);
+                            onUpdatePlacement(selectedPlacement, {
+                              frames: nextFrames.length > 1 ? nextFrames : undefined,
+                              frame_ms:
+                                nextFrames.length > 1
+                                  ? (placement.frame_ms ?? DEFAULT_FRAME_MS)
+                                  : undefined,
+                            });
+                          }}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </>
           )}
 
-          <ul className="frame-list">
-            {frames.map((frame, index) => {
-              const frameTileset = tilesets.get(frame.tileset) ?? null;
-              const frameImage = tilesetImages.get(frame.tileset) ?? null;
-              return (
-                <li key={`${index}-${frame.tileset}-${frame.id}`} className="frame-list-item">
-                  <TilePreview
-                    tileset={frameTileset}
-                    image={frameImage}
-                    tileId={frame.id}
-                    size={36}
-                    className="frame-preview-canvas"
-                  />
-                  <div className="frame-list-meta">
-                    <span className="mono">
-                      #{index} {frame.tileset}:{frame.id}
-                    </span>
-                    {index === 0 && <span className="hint">primary</span>}
-                  </div>
-                  {index > 0 && (
-                    <button
-                      type="button"
-                      className="frame-remove-btn"
-                      title="Remove frame"
-                      onClick={() => {
-                        const nextFrames = frames.filter((_, i) => i !== index);
-                        onUpdatePlacement(selectedPlacement, {
-                          frames: nextFrames.length > 1 ? nextFrames : undefined,
-                          frame_ms:
-                            nextFrames.length > 1 ? (placement.frame_ms ?? DEFAULT_FRAME_MS) : undefined,
-                        });
-                      }}
-                    >
-                      ×
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-
           <button type="button" className="danger-btn" onClick={onDeletePlacement}>
-            Delete tile
+            Delete tile{selectedPlacementCount > 1 ? "s" : ""}
           </button>
         </section>
       )}

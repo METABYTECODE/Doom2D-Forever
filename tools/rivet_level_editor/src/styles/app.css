@@ -108,6 +108,38 @@ select {
   font-family: "JetBrains Mono", monospace;
 }
 
+.options-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+}
+
+.options-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.options-tools button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.options-tools button:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.options-tools button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* ── Menu bar ── */
 .menu-bar {
   display: flex;

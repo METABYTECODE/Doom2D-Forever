@@ -4,25 +4,24 @@ import { worldCellSize } from "../lib/level-collision";
 import { hitObject, tileAt } from "../lib/geometry";
 import { tileCellSpan, tileIndexToAtlasCell } from "../lib/tile-math";
 import { tileFootprintSpan } from "../lib/tile-footprint";
+import { findPlacementAt } from "../lib/tile-placements";
+import { placementFootprint } from "../lib/tile-selection";
+import { normalizeRect } from "../lib/grid-rect";
 import {
   FLUID_ACID,
   FLUID_LAVA,
   FLUID_WATER,
-  type CollisionTool,
   type EditorMode,
-  type FluidTool,
+  type GridTool,
   type LevelData,
   type ObjectTool,
-  type TileTool,
 } from "../types/level";
 import type { TilesetDef } from "../types/tileset";
 
 interface Props {
   level: LevelData;
   mode: EditorMode;
-  tileTool: TileTool;
-  collisionTool: CollisionTool;
-  fluidTool: FluidTool;
+  gridTool: GridTool;
   objectTool: ObjectTool;
   brushSize: number;
   activeTilesetId: string;
@@ -31,6 +30,7 @@ interface Props {
   backgroundImage: HTMLImageElement | null;
   selectedObject: number;
   selectedPlacement: number;
+  selectedPlacements: ReadonlySet<number>;
   mapRevision: number;
   onPointer: (
     worldX: number,
@@ -41,7 +41,12 @@ interface Props {
   onStrokeBegin?: () => void;
   onStrokeEnd?: () => void;
   onObjectDrag: (index: number, worldX: number, worldY: number) => void;
-  onPlacementDrag: (index: number, cellX: number, cellY: number) => void;
+  onPlacementsDrag: (indices: number[], anchorIndex: number, cellX: number, cellY: number) => void;
+  onPlacementsDragEnd?: () => void;
+  onMarqueeSelect: (x0: number, y0: number, x1: number, y1: number, additive: boolean) => void;
+  onLineTool: (x0: number, y0: number, x1: number, y1: number) => void;
+  onFillTool: (x0: number, y0: number, x1: number, y1: number) => void;
+  onTilePick: (index: number, additive: boolean) => void;
 }
 
 const OBJECT_COLORS: Record<string, string> = {
@@ -62,15 +67,15 @@ const FLUID_STROKE: Record<number, string> = {
 };
 
 type HoverRect = { tx: number; ty: number; w: number; h: number };
+type MarqueeRect = { x0: number; y0: number; x1: number; y1: number };
 
 type DrawState = {
   camera: { x: number; y: number; zoom: number };
   hover: HoverRect | null;
+  marquee: MarqueeRect | null;
   level: LevelData;
   mode: EditorMode;
-  tileTool: TileTool;
-  collisionTool: CollisionTool;
-  fluidTool: FluidTool;
+  gridTool: GridTool;
   objectTool: ObjectTool;
   brushSize: number;
   activeTilesetId: string;
@@ -79,10 +84,11 @@ type DrawState = {
   backgroundImage: HTMLImageElement | null;
   selectedObject: number;
   selectedPlacement: number;
+  selectedPlacements: ReadonlySet<number>;
 };
 
 function hoverFootprint(state: DrawState, tx: number, ty: number): HoverRect {
-  if (state.mode === "tiles" && state.tileTool === "paint" && state.activeTilesetId) {
+  if (state.mode === "tiles" && state.gridTool === "paint" && state.activeTilesetId) {
     const span = tileFootprintSpan(
       state.tilesets,
       state.activeTilesetId,
@@ -90,30 +96,26 @@ function hoverFootprint(state: DrawState, tx: number, ty: number): HoverRect {
     );
     return { tx, ty, w: span.w, h: span.h };
   }
-  if (state.mode === "collision" || state.mode === "fluids") {
+  if (
+    (state.mode === "collision" || state.mode === "fluids") &&
+    (state.gridTool === "paint" || state.gridTool === "erase")
+  ) {
     const size = Math.min(16, Math.max(1, Math.round(state.brushSize)));
     return { tx, ty, w: size, h: size };
   }
   return { tx, ty, w: 1, h: 1 };
 }
 
-function hoverStrokeColor(mode: EditorMode, fluidTool: FluidTool): string {
+function hoverStrokeColor(mode: EditorMode): string {
   if (mode === "collision") return "rgba(255,200,100,1)";
-  if (mode === "fluids") {
-    if (fluidTool === "water") return "rgba(120,190,255,1)";
-    if (fluidTool === "acid") return "rgba(140,255,140,1)";
-    if (fluidTool === "lava") return "rgba(255,150,80,1)";
-    return "rgba(200,200,200,0.9)";
-  }
+  if (mode === "fluids") return "rgba(120,190,255,1)";
   return "rgba(110,168,255,0.9)";
 }
 
 export function LevelCanvas({
   level,
   mode,
-  tileTool,
-  collisionTool,
-  fluidTool,
+  gridTool,
   objectTool,
   brushSize,
   activeTilesetId,
@@ -122,15 +124,21 @@ export function LevelCanvas({
   backgroundImage,
   selectedObject,
   selectedPlacement,
+  selectedPlacements,
   mapRevision,
   onPointer,
   onStrokeBegin,
   onStrokeEnd,
   onObjectDrag,
-  onPlacementDrag,
+  onPlacementsDrag,
+  onPlacementsDragEnd,
+  onMarqueeSelect,
+  onLineTool,
+  onFillTool,
+  onTilePick,
 }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [camera, setCamera] = useState({ x: 320, y: 240, zoom: 2 });
 
   const paintingRef = useRef(false);
@@ -140,20 +148,22 @@ export function LevelCanvas({
   const panRef = useRef({ active: false, sx: 0, sy: 0, cx: 0, cy: 0 });
   const dragRef = useRef<
     | { kind: "object"; index: number; offsetX: number; offsetY: number }
-    | { kind: "placement"; index: number; offsetX: number; offsetY: number }
+    | { kind: "placements"; indices: number[]; anchorIndex: number; offsetX: number; offsetY: number }
     | null
   >(null);
+  const marqueeRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const lineRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const fillRef = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const hoverRef = useRef<HoverRect | null>(null);
   const animationStartRef = useRef(performance.now());
   const cameraRef = useRef(camera);
   const drawStateRef = useRef<DrawState>({
     camera,
     hover: null,
+    marquee: null,
     level,
     mode,
-    tileTool,
-    collisionTool,
-    fluidTool,
+    gridTool,
     objectTool,
     brushSize,
     activeTilesetId,
@@ -162,17 +172,17 @@ export function LevelCanvas({
     backgroundImage,
     selectedObject,
     selectedPlacement,
+    selectedPlacements,
   });
 
   cameraRef.current = camera;
   drawStateRef.current = {
     camera,
     hover: hoverRef.current,
+    marquee: marqueeRef.current ?? lineRef.current ?? fillRef.current,
     level,
     mode,
-    tileTool,
-    collisionTool,
-    fluidTool,
+    gridTool,
     objectTool,
     brushSize,
     activeTilesetId,
@@ -181,6 +191,7 @@ export function LevelCanvas({
     backgroundImage,
     selectedObject,
     selectedPlacement,
+    selectedPlacements,
   };
 
   useEffect(() => {
@@ -250,7 +261,7 @@ export function LevelCanvas({
     let frame = 0;
     const draw = () => {
       const state = drawStateRef.current;
-      const { camera: cam, hover, level: lvl } = state;
+      const { camera: cam, hover, marquee, level: lvl } = state;
       const cell = worldCellSize(lvl);
       const rect = container.getBoundingClientRect();
       const w = rect.width;
@@ -294,13 +305,10 @@ export function LevelCanvas({
         const frame = animatedTileFrame(placement, elapsedMs);
         const ts = state.tilesets.get(frame.tileset);
         const image = state.tilesetImages.get(frame.tileset);
-        const footprintTs = ts ?? state.tilesets.get(placement.tileset);
-        const span = footprintTs
-          ? tileCellSpan(footprintTs, worldCellSize(lvl))
-          : { w: 1, h: 1 };
+        const fp = placementFootprint(placement, state.tilesets, worldCellSize(lvl));
         const p = toScreen(placement.x * cell, placement.y * cell);
-        const pw = span.w * cell * cam.zoom;
-        const ph = span.h * cell * cam.zoom;
+        const pw = fp.w * cell * cam.zoom;
+        const ph = fp.h * cell * cam.zoom;
 
         if (ts && image) {
           const { col, row } = tileIndexToAtlasCell(frame.id, ts.columns);
@@ -321,7 +329,9 @@ export function LevelCanvas({
           ctx.fillRect(p.x, p.y, pw, ph);
         }
 
-        if (index === state.selectedPlacement) {
+        const selected =
+          state.selectedPlacements.has(index) || index === state.selectedPlacement;
+        if (selected) {
           ctx.strokeStyle = "#fff6a0";
           ctx.lineWidth = 2;
           ctx.strokeRect(p.x, p.y, pw, ph);
@@ -358,22 +368,28 @@ export function LevelCanvas({
           ctx.strokeStyle = collisionStroke;
           ctx.lineWidth = state.mode === "collision" ? 2 : 1;
           ctx.strokeRect(p.x + 0.5, p.y + 0.5, cellScreen - 1, cellScreen - 1);
-          if (state.mode === "collision" && cellScreen >= 6) {
-            ctx.beginPath();
-            ctx.moveTo(p.x + 2, p.y + 2);
-            ctx.lineTo(p.x + cellScreen - 2, p.y + cellScreen - 2);
-            ctx.moveTo(p.x + cellScreen - 2, p.y + 2);
-            ctx.lineTo(p.x + 2, p.y + cellScreen - 2);
-            ctx.stroke();
-          }
         }
+      }
+
+      if (marquee) {
+        const { x0, y0, x1, y1 } = normalizeRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
+        const p = toScreen(x0 * cell, y0 * cell);
+        const rw = (x1 - x0 + 1) * cellScreen;
+        const rh = (y1 - y0 + 1) * cellScreen;
+        ctx.fillStyle = "rgba(110, 168, 255, 0.12)";
+        ctx.fillRect(p.x, p.y, rw, rh);
+        ctx.strokeStyle = "rgba(110, 168, 255, 0.95)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(p.x, p.y, rw, rh);
+        ctx.setLineDash([]);
       }
 
       if (hover) {
         const hp = toScreen(hover.tx * cell, hover.ty * cell);
         const hw = hover.w * cellScreen;
         const hh = hover.h * cellScreen;
-        ctx.strokeStyle = hoverStrokeColor(state.mode, state.fluidTool);
+        ctx.strokeStyle = hoverStrokeColor(state.mode);
         ctx.lineWidth = 2;
         ctx.strokeRect(hp.x, hp.y, hw, hh);
       }
@@ -395,7 +411,7 @@ export function LevelCanvas({
       ctx.font = "11px JetBrains Mono, monospace";
       const hoverText = hover ? ` · ${hover.tx},${hover.ty}` : "";
       ctx.fillText(
-        `${state.mode} · ${Math.round(cam.zoom * 100)}%${hoverText} · MMB/Space pan`,
+        `${state.mode}/${state.gridTool} · ${Math.round(cam.zoom * 100)}%${hoverText} · MMB/Space pan`,
         12,
         h - 10,
       );
@@ -423,10 +439,14 @@ export function LevelCanvas({
     };
   };
 
+  const worldToCell = (worldX: number, worldY: number) => {
+    const cell = worldCellSize(level);
+    return tileAt(worldX, worldY, cell);
+  };
+
   const updateHover = (clientX: number, clientY: number) => {
     const world = screenToWorld(clientX, clientY);
-    const cell = worldCellSize(level);
-    const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
+    const { x: tx, y: ty } = worldToCell(world.x, world.y);
     const next = hoverFootprint(drawStateRef.current, tx, ty);
     const prev = hoverRef.current;
     if (!prev || prev.tx !== next.tx || prev.ty !== next.ty || prev.w !== next.w || prev.h !== next.h) {
@@ -436,14 +456,14 @@ export function LevelCanvas({
   };
 
   const strokeActive =
-    (mode === "tiles" && (tileTool === "paint" || tileTool === "erase")) ||
-    (mode === "collision" && (collisionTool === "paint" || collisionTool === "erase")) ||
-    (mode === "fluids" && (fluidTool === "water" || fluidTool === "acid" || fluidTool === "lava" || fluidTool === "erase"));
+    gridTool === "paint" ||
+    gridTool === "erase" ||
+    (mode === "collision" && (gridTool === "paint" || gridTool === "erase")) ||
+    (mode === "fluids" && (gridTool === "paint" || gridTool === "erase"));
 
   const paintStroke = (clientX: number, clientY: number, button: number, isStrokeStart: boolean) => {
     const world = screenToWorld(clientX, clientY);
-    const cell = worldCellSize(level);
-    const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
+    const { x: tx, y: ty } = worldToCell(world.x, world.y);
 
     if (isStrokeStart) {
       lastStrokeCellRef.current = { tx, ty };
@@ -458,6 +478,13 @@ export function LevelCanvas({
     }
   };
 
+  const clearDragPreview = () => {
+    marqueeRef.current = null;
+    lineRef.current = null;
+    fillRef.current = null;
+    drawStateRef.current.marquee = null;
+  };
+
   return (
     <div
       ref={containerRef}
@@ -467,6 +494,7 @@ export function LevelCanvas({
         e.preventDefault();
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         const world = screenToWorld(e.clientX, e.clientY);
+        const { x: tx, y: ty } = worldToCell(world.x, world.y);
 
         if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
           panRef.current = {
@@ -494,12 +522,51 @@ export function LevelCanvas({
           }
         }
 
-        if (mode === "tiles" && tileTool === "select" && e.button === 0) {
-          onPointer(world.x, world.y, e.button);
+        if (mode === "tiles" && gridTool === "select" && e.button === 0) {
+          const hit = findPlacementAt(level.tiles, tilesets, tx, ty, level.grid_size);
+          if (hit >= 0) {
+            const placement = level.tiles[hit];
+            if (e.shiftKey) {
+              onTilePick(hit, true);
+            } else if (!selectedPlacements.has(hit)) {
+              onTilePick(hit, false);
+            }
+            const indices =
+              selectedPlacements.has(hit) && selectedPlacements.size > 0
+                ? [...selectedPlacements]
+                : e.shiftKey
+                  ? [...selectedPlacements]
+                  : [hit];
+            const dragIndices = indices.includes(hit) ? indices : [hit, ...indices];
+            dragRef.current = {
+              kind: "placements",
+              indices: dragIndices,
+              anchorIndex: hit,
+              offsetX: tx - placement.x,
+              offsetY: ty - placement.y,
+            };
+            onStrokeBegin?.();
+            return;
+          }
+          onTilePick(-1, !e.shiftKey);
+          marqueeRef.current = { x0: tx, y0: ty, x1: tx, y1: ty };
+          drawStateRef.current.marquee = marqueeRef.current;
           return;
         }
 
-        if (strokeActive && e.button === 0) {
+        if (gridTool === "line" && e.button === 0 && mode !== "objects") {
+          lineRef.current = { x0: tx, y0: ty, x1: tx, y1: ty };
+          drawStateRef.current.marquee = lineRef.current;
+          return;
+        }
+
+        if (gridTool === "fill" && e.button === 0 && mode !== "objects") {
+          fillRef.current = { x0: tx, y0: ty, x1: tx, y1: ty };
+          drawStateRef.current.marquee = fillRef.current;
+          return;
+        }
+
+        if (strokeActive && e.button === 0 && mode !== "objects") {
           paintingRef.current = true;
           strokeButtonRef.current = e.button;
           onStrokeBegin?.();
@@ -521,8 +588,20 @@ export function LevelCanvas({
         }
 
         const world = screenToWorld(e.clientX, e.clientY);
-        const cell = worldCellSize(level);
-        const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
+        const { x: tx, y: ty } = worldToCell(world.x, world.y);
+
+        if (marqueeRef.current) {
+          marqueeRef.current = { ...marqueeRef.current, x1: tx, y1: ty };
+          drawStateRef.current.marquee = marqueeRef.current;
+        }
+        if (lineRef.current) {
+          lineRef.current = { ...lineRef.current, x1: tx, y1: ty };
+          drawStateRef.current.marquee = lineRef.current;
+        }
+        if (fillRef.current) {
+          fillRef.current = { ...fillRef.current, x1: tx, y1: ty };
+          drawStateRef.current.marquee = fillRef.current;
+        }
 
         if (dragRef.current?.kind === "object") {
           onObjectDrag(
@@ -533,9 +612,10 @@ export function LevelCanvas({
           return;
         }
 
-        if (dragRef.current?.kind === "placement") {
-          onPlacementDrag(
-            dragRef.current.index,
+        if (dragRef.current?.kind === "placements") {
+          onPlacementsDrag(
+            dragRef.current.indices,
+            dragRef.current.anchorIndex,
             tx - dragRef.current.offsetX,
             ty - dragRef.current.offsetY,
           );
@@ -547,6 +627,28 @@ export function LevelCanvas({
         paintStroke(e.clientX, e.clientY, button, false);
       }}
       onPointerUp={(e) => {
+        const world = screenToWorld(e.clientX, e.clientY);
+        const { x: tx, y: ty } = worldToCell(world.x, world.y);
+
+        if (marqueeRef.current && mode === "tiles" && gridTool === "select") {
+          const { x0, y0, x1, y1 } = marqueeRef.current;
+          onMarqueeSelect(x0, y0, x1, y1, e.shiftKey);
+        } else if (lineRef.current) {
+          const { x0, y0 } = lineRef.current;
+          onStrokeBegin?.();
+          onLineTool(x0, y0, tx, ty);
+          onStrokeEnd?.();
+        } else if (fillRef.current) {
+          const { x0, y0 } = fillRef.current;
+          onStrokeBegin?.();
+          onFillTool(x0, y0, tx, ty);
+          onStrokeEnd?.();
+        }
+
+        if (dragRef.current?.kind === "placements") {
+          onStrokeEnd?.();
+        }
+
         if (paintingRef.current) {
           onStrokeEnd?.();
         }
@@ -554,6 +656,8 @@ export function LevelCanvas({
         lastStrokeCellRef.current = null;
         panRef.current.active = false;
         dragRef.current = null;
+        onPlacementsDragEnd?.();
+        clearDragPreview();
         try {
           (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
         } catch {
@@ -568,6 +672,8 @@ export function LevelCanvas({
         lastStrokeCellRef.current = null;
         panRef.current.active = false;
         dragRef.current = null;
+        onPlacementsDragEnd?.();
+        clearDragPreview();
         hoverRef.current = null;
         drawStateRef.current.hover = null;
       }}

@@ -61,9 +61,10 @@ export interface LevelData {
 
 export type EditorMode = "tiles" | "collision" | "fluids" | "objects";
 
-export type TileTool = "paint" | "erase" | "select";
-export type CollisionTool = "paint" | "erase";
-export type FluidTool = "water" | "acid" | "lava" | "erase";
+/** Sub-tools for tile / collision / fluid layers (top options bar). */
+export type GridTool = "select" | "paint" | "line" | "fill" | "erase";
+
+export type FluidPaint = "water" | "acid" | "lava";
 export type ObjectTool = "place-player" | "place-block" | "select";
 
 /** Fluid layer applied when painting tiles (tileset dock). */

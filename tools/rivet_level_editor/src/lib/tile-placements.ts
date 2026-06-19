@@ -109,3 +109,35 @@ export function canPlaceTile(
   void tileId;
   return true;
 }
+
+/** Remove placements whose footprint overlaps the given rect (optionally keeping some indices). */
+export function removeOverlappingPlacements(
+  placements: PlacedTile[],
+  tilesets: Map<string, TilesetDef>,
+  cellX: number,
+  cellY: number,
+  spanW: number,
+  spanH: number,
+  keepIndices: ReadonlySet<number> = new Set(),
+  gridSize: number = GRID_SIZE,
+): { tiles: PlacedTile[]; removed: Set<number> } {
+  const removed = new Set<number>();
+  const tiles = placements.filter((placement, index) => {
+    if (keepIndices.has(index)) return true;
+    const ts = tilesets.get(placement.tileset);
+    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
+    const overlaps = rectsOverlap(
+      cellX,
+      cellY,
+      spanW,
+      spanH,
+      placement.x,
+      placement.y,
+      span.w,
+      span.h,
+    );
+    if (overlaps) removed.add(index);
+    return !overlaps;
+  });
+  return { tiles, removed };
+}

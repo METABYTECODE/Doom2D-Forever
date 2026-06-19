@@ -14,6 +14,7 @@ import { useLevelHistory } from "./hooks/useLevelHistory";
 import { hitObject, snapPoint, tileAt } from "./lib/geometry";
 import { strokeBrushCells } from "./lib/brush";
 import { gridLineCells, paintCollisionCells, worldCellSize } from "./lib/level-collision";
+import { rectCells } from "./lib/grid-rect";
 import { FLUID_NONE } from "./types/level";
 import { paintFluidCells } from "./lib/level-fluids";
 import {
@@ -23,7 +24,15 @@ import {
   resizeLevel,
 } from "./lib/level-io";
 import { applyTilePaintLayers, paintFluidToId } from "./lib/tile-layers";
-import { canPlaceTile, findPlacementAt } from "./lib/tile-placements";
+import {
+  findPlacementAt,
+  removeOverlappingPlacements,
+} from "./lib/tile-placements";
+import {
+  canMovePlacements,
+  placementsInRect,
+} from "./lib/tile-selection";
+import { tileCellSpan } from "./lib/tile-math";
 import { validateLevel } from "./lib/level-validation";
 import {
   DEFAULT_PACK_ID,
@@ -32,14 +41,13 @@ import {
   loadTilesetImage,
 } from "./lib/resource-pack";
 import type {
-  CollisionTool,
   EditorMode,
-  FluidTool,
+  FluidPaint,
+  GridTool,
   LevelObject,
   ObjectTool,
   PaintFluidOption,
   PlacedTile,
-  TileTool,
 } from "./types/level";
 import { DEFAULT_FRAME_MS } from "./types/level";
 import type { TilesetDef } from "./types/tileset";
@@ -48,9 +56,8 @@ export function App() {
   const { level, dirty, replace, update, beginStroke, endStroke, undo, redo, markSaved, canUndo, canRedo } =
     useLevelHistory(createBlankLevel());
   const [mode, setMode] = useState<EditorMode>("tiles");
-  const [tileTool, setTileTool] = useState<TileTool>("paint");
-  const [collisionTool, setCollisionTool] = useState<CollisionTool>("paint");
-  const [fluidTool, setFluidTool] = useState<FluidTool>("water");
+  const [gridTool, setGridTool] = useState<GridTool>("select");
+  const [fluidPaint, setFluidPaint] = useState<FluidPaint>("water");
   const [objectTool, setObjectTool] = useState<ObjectTool>("select");
   const [brushSize, setBrushSize] = useState(1);
   const [paintCollision, setPaintCollision] = useState(false);
@@ -66,6 +73,7 @@ export function App() {
   const [selectedTileId, setSelectedTileId] = useState(0);
   const [selectedObject, setSelectedObject] = useState(-1);
   const [selectedPlacement, setSelectedPlacement] = useState(-1);
+  const [selectedPlacements, setSelectedPlacements] = useState<Set<number>>(new Set());
   const [snapGrid, setSnapGrid] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [status, setStatus] = useState("Loading…");
@@ -74,6 +82,7 @@ export function App() {
   const [framePickerOpen, setFramePickerOpen] = useState(false);
   const [framePickerTilesetId, setFramePickerTilesetId] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const placementDragSnapshotRef = useRef<Map<number, { x: number; y: number }> | null>(null);
 
   useEffect(() => {
     setTilesets(pack.tilesets);
@@ -192,14 +201,21 @@ export function App() {
   );
 
   const deleteSelectedPlacement = useCallback(() => {
-    if (selectedPlacement < 0) return;
+    const toRemove =
+      selectedPlacements.size > 0
+        ? selectedPlacements
+        : selectedPlacement >= 0
+          ? new Set([selectedPlacement])
+          : new Set<number>();
+    if (toRemove.size === 0) return;
     update((prev) => ({
       ...prev,
-      tiles: prev.tiles.filter((_, i) => i !== selectedPlacement),
+      tiles: prev.tiles.filter((_, i) => !toRemove.has(i)),
     }));
     setSelectedPlacement(-1);
-    setStatus("Tile deleted");
-  }, [selectedPlacement, update]);
+    setSelectedPlacements(new Set());
+    setStatus(`Deleted ${toRemove.size} tile(s)`);
+  }, [selectedPlacement, selectedPlacements, update]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -218,8 +234,17 @@ export function App() {
         return;
       }
       if (e.key === "Delete") {
-        if (selectedPlacement >= 0 && mode === "tiles") deleteSelectedPlacement();
-        else if (selectedObject >= 0) deleteSelectedObject();
+        if (mode === "tiles" && (selectedPlacements.size > 0 || selectedPlacement >= 0)) {
+          deleteSelectedPlacement();
+        } else if (selectedObject >= 0) deleteSelectedObject();
+        return;
+      }
+      if (e.ctrlKey && e.key.toLowerCase() === "a" && mode === "tiles") {
+        e.preventDefault();
+        const all = new Set(level.tiles.map((_, i) => i));
+        setSelectedPlacements(all);
+        setSelectedPlacement(level.tiles.length > 0 ? 0 : -1);
+        setStatus(`Selected ${all.size} tile(s)`);
         return;
       }
       if (e.key === "t") setMode("tiles");
@@ -233,10 +258,12 @@ export function App() {
     deleteSelectedObject,
     deleteSelectedPlacement,
     exportLevel,
+    level.tiles,
     mode,
     redo,
     selectedObject,
     selectedPlacement,
+    selectedPlacements.size,
     undo,
   ]);
 
@@ -244,6 +271,179 @@ export function App() {
     () => (selectedObject >= 0 ? level.objects[selectedObject] : null),
     [level.objects, selectedObject],
   );
+
+  const syncPrimarySelection = (next: Set<number>) => {
+    setSelectedPlacements(next);
+    const first = next.values().next().value as number | undefined;
+    setSelectedPlacement(first ?? -1);
+  };
+
+  const onTilePick = (index: number, additive: boolean) => {
+    if (index < 0) {
+      if (!additive) syncPrimarySelection(new Set());
+      return;
+    }
+    if (additive) {
+      const next = new Set(selectedPlacements);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      syncPrimarySelection(next);
+      return;
+    }
+    syncPrimarySelection(new Set([index]));
+  };
+
+  const onMarqueeSelect = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
+    const hits = placementsInRect(level.tiles, tilesets, x0, y0, x1, y1, level.grid_size);
+    if (additive) {
+      const next = new Set(selectedPlacements);
+      for (const index of hits) next.add(index);
+      syncPrimarySelection(next);
+    } else {
+      syncPrimarySelection(new Set(hits));
+    }
+    setStatus(`Selected ${hits.length} tile(s)`);
+  };
+
+  const paintTilesAtCells = (cells: Array<{ x: number; y: number }>) => {
+    update((prev) => {
+      let tiles = [...prev.tiles];
+      const collision = prev.collision.map((row) => [...row]);
+      const fluids = prev.fluids.map((row) => [...row]);
+      let changed = false;
+
+      for (const { x, y } of cells) {
+        if (x < 0 || y < 0 || x >= prev.width || y >= prev.height) continue;
+        const ts = tilesets.get(activeTilesetId);
+        const span = ts ? tileCellSpan(ts, prev.grid_size) : { w: 1, h: 1 };
+        if (x + span.w > prev.width || y + span.h > prev.height) continue;
+
+        const cleared = removeOverlappingPlacements(
+          tiles,
+          tilesets,
+          x,
+          y,
+          span.w,
+          span.h,
+          new Set(),
+          prev.grid_size,
+        );
+        if (cleared.tiles.length !== tiles.length) changed = true;
+        tiles = cleared.tiles;
+        tiles.push({
+          tileset: activeTilesetId,
+          id: selectedTileId,
+          x,
+          y,
+        });
+        changed = true;
+
+        if (paintCollision || paintFluid !== "none") {
+          changed =
+            applyTilePaintLayers(
+              collision,
+              fluids,
+              x,
+              y,
+              tilesets,
+              activeTilesetId,
+              paintCollision,
+              paintFluid,
+              prev.width,
+              prev.height,
+              prev.grid_size,
+            ) || changed;
+        }
+      }
+
+      if (!changed) return prev;
+      return { ...prev, tiles, collision, fluids };
+    });
+  };
+
+  const eraseTilesAtCells = (cells: Array<{ x: number; y: number }>) => {
+    update((prev) => {
+      const toRemove = new Set<number>();
+      for (const { x, y } of cells) {
+        const hit = findPlacementAt(prev.tiles, tilesets, x, y, prev.grid_size);
+        if (hit >= 0) toRemove.add(hit);
+      }
+      if (toRemove.size === 0) return prev;
+      const nextTiles = prev.tiles.filter((_, i) => !toRemove.has(i));
+      if (selectedPlacement >= 0 && toRemove.has(selectedPlacement)) {
+        setSelectedPlacement(-1);
+      setSelectedPlacements(new Set());
+      }
+      setSelectedPlacements((current) => {
+        const next = new Set<number>();
+        for (const index of current) {
+          if (!toRemove.has(index)) next.add(index);
+        }
+        return next;
+      });
+      return { ...prev, tiles: nextTiles };
+    });
+  };
+
+  const applyCollisionCells = (
+    cells: Array<{ x: number; y: number }>,
+    value: number,
+  ) => {
+    update((prev) => {
+      const collision = prev.collision.map((row) => [...row]);
+      if (!paintCollisionCells(collision, cells, value, prev.width, prev.height)) return prev;
+      return { ...prev, collision };
+    });
+  };
+
+  const applyFluidCells = (cells: Array<{ x: number; y: number }>, value: number) => {
+    update((prev) => {
+      const fluids = prev.fluids.map((row) => [...row]);
+      if (!paintFluidCells(fluids, cells, value, prev.width, prev.height)) return prev;
+      return { ...prev, fluids };
+    });
+  };
+
+  const onLineTool = (x0: number, y0: number, x1: number, y1: number) => {
+    const cells = gridLineCells(x0, y0, x1, y1);
+    if (mode === "tiles") {
+      paintTilesAtCells(cells);
+      return;
+    }
+    if (mode === "collision") {
+      const value = gridTool === "erase" ? 0 : 1;
+      const expanded = cells.flatMap((cell) =>
+        strokeBrushCells(undefined, cell.x, cell.y, brushSize, level.width, level.height),
+      );
+      applyCollisionCells(expanded, value);
+      return;
+    }
+    if (mode === "fluids") {
+      const value = gridTool === "erase" ? FLUID_NONE : paintFluidToId(fluidPaint);
+      const expanded = cells.flatMap((cell) =>
+        strokeBrushCells(undefined, cell.x, cell.y, brushSize, level.width, level.height),
+      );
+      applyFluidCells(expanded, value);
+    }
+  };
+
+  const onFillTool = (x0: number, y0: number, x1: number, y1: number) => {
+    const cells = rectCells(x0, y0, x1, y1, level.width, level.height);
+    if (mode === "tiles") {
+      if (gridTool === "erase") eraseTilesAtCells(cells);
+      else paintTilesAtCells(cells);
+      return;
+    }
+    if (mode === "collision") {
+      const value = gridTool === "erase" ? 0 : 1;
+      applyCollisionCells(cells, value);
+      return;
+    }
+    if (mode === "fluids") {
+      const value = gridTool === "erase" ? FLUID_NONE : paintFluidToId(fluidPaint);
+      applyFluidCells(cells, value);
+    }
+  };
 
   const placeAt = (worldX: number, worldY: number) => {
     const cell = worldCellSize(level);
@@ -261,7 +461,7 @@ export function App() {
 
     if (mode === "collision") {
       if (tx < 0 || ty < 0 || tx >= level.width || ty >= level.height) return;
-      const value = collisionTool === "paint" ? 1 : 0;
+      const value = gridTool === "erase" ? 0 : 1;
       const cells = strokeBrushCells(
         strokeFrom,
         tx,
@@ -270,17 +470,13 @@ export function App() {
         level.width,
         level.height,
       );
-      update((prev) => {
-        const collision = prev.collision.map((row) => [...row]);
-        if (!paintCollisionCells(collision, cells, value, prev.width, prev.height)) return prev;
-        return { ...prev, collision };
-      });
+      applyCollisionCells(cells, value);
       return;
     }
 
     if (mode === "fluids") {
       if (tx < 0 || ty < 0 || tx >= level.width || ty >= level.height) return;
-      const value = fluidTool === "erase" ? FLUID_NONE : paintFluidToId(fluidTool);
+      const value = gridTool === "erase" ? FLUID_NONE : paintFluidToId(fluidPaint);
       const cells = strokeBrushCells(
         strokeFrom,
         tx,
@@ -289,95 +485,24 @@ export function App() {
         level.width,
         level.height,
       );
-      update((prev) => {
-        const fluids = prev.fluids.map((row) => [...row]);
-        if (!paintFluidCells(fluids, cells, value, prev.width, prev.height)) return prev;
-        return { ...prev, fluids };
-      });
+      applyFluidCells(cells, value);
       return;
     }
 
     if (mode === "tiles") {
-      if (tileTool === "paint" && button === 0) {
+      if (gridTool === "paint" && button === 0) {
         const cells = strokeFrom
           ? gridLineCells(strokeFrom.tx, strokeFrom.ty, tx, ty)
           : [{ x: tx, y: ty }];
-        update((prev) => {
-          const tiles = [...prev.tiles];
-          const collision = prev.collision.map((row) => [...row]);
-          const fluids = prev.fluids.map((row) => [...row]);
-          let changed = false;
-          for (const { x, y } of cells) {
-            if (x < 0 || y < 0 || x >= prev.width || y >= prev.height) continue;
-            if (
-              !canPlaceTile(
-                tiles,
-                tilesets,
-                activeTilesetId,
-                selectedTileId,
-                x,
-                y,
-                prev.width,
-                prev.height,
-                -1,
-                prev.grid_size,
-              )
-            ) {
-              continue;
-            }
-            tiles.push({
-              tileset: activeTilesetId,
-              id: selectedTileId,
-              x,
-              y,
-            });
-            changed = true;
-            if (paintCollision || paintFluid !== "none") {
-              changed =
-                applyTilePaintLayers(
-                  collision,
-                  fluids,
-                  x,
-                  y,
-                  tilesets,
-                  activeTilesetId,
-                  paintCollision,
-                  paintFluid,
-                  prev.width,
-                  prev.height,
-                  prev.grid_size,
-                ) || changed;
-            }
-          }
-          if (!changed) return prev;
-          return { ...prev, tiles, collision, fluids };
-        });
+        paintTilesAtCells(cells);
         return;
       }
 
-      if (tileTool === "erase" && button === 0) {
+      if (gridTool === "erase" && button === 0) {
         const cells = strokeFrom
           ? gridLineCells(strokeFrom.tx, strokeFrom.ty, tx, ty)
           : [{ x: tx, y: ty }];
-        update((prev) => {
-          const toRemove = new Set<number>();
-          for (const { x, y } of cells) {
-            const hit = findPlacementAt(prev.tiles, tilesets, x, y, prev.grid_size);
-            if (hit >= 0) toRemove.add(hit);
-          }
-          if (toRemove.size === 0) return prev;
-          const nextTiles = prev.tiles.filter((_, i) => !toRemove.has(i));
-          if (selectedPlacement >= 0 && toRemove.has(selectedPlacement)) {
-            setSelectedPlacement(-1);
-          }
-          return { ...prev, tiles: nextTiles };
-        });
-        return;
-      }
-
-      if (tileTool === "select" && button === 0) {
-        const hit = findPlacementAt(level.tiles, tilesets, tx, ty, level.grid_size);
-        setSelectedPlacement(hit);
+        eraseTilesAtCells(cells);
         return;
       }
     }
@@ -430,31 +555,53 @@ export function App() {
     }));
   };
 
-  const onPlacementDrag = (index: number, cellX: number, cellY: number) => {
+  const onPlacementsDrag = (indices: number[], anchorIndex: number, cellX: number, cellY: number) => {
     update((prev) => {
-      const current = prev.tiles[index];
-      if (!current) return prev;
+      const anchor = prev.tiles[anchorIndex];
+      if (!anchor) return prev;
+
+      if (!placementDragSnapshotRef.current) {
+        const snap = new Map<number, { x: number; y: number }>();
+        for (const index of indices) {
+          const tile = prev.tiles[index];
+          if (tile) snap.set(index, { x: tile.x, y: tile.y });
+        }
+        placementDragSnapshotRef.current = snap;
+      }
+
+      const origin = placementDragSnapshotRef.current.get(anchorIndex);
+      if (!origin) return prev;
+      const deltaX = cellX - origin.x;
+      const deltaY = cellY - origin.y;
+      if (deltaX === 0 && deltaY === 0) return prev;
+
+      const snapshotTiles = prev.tiles.map((tile, i) => {
+        const start = placementDragSnapshotRef.current?.get(i);
+        if (!start) return tile;
+        return { ...tile, x: start.x + deltaX, y: start.y + deltaY };
+      });
+
       if (
-        !canPlaceTile(
-          prev.tiles,
+        !canMovePlacements(
+          snapshotTiles,
           tilesets,
-          current.tileset,
-          current.id,
-          cellX,
-          cellY,
+          indices,
+          0,
+          0,
           prev.width,
           prev.height,
-          index,
           prev.grid_size,
         )
       ) {
         return prev;
       }
-      return {
-        ...prev,
-        tiles: prev.tiles.map((tile, i) => (i === index ? { ...tile, x: cellX, y: cellY } : tile)),
-      };
+
+      return { ...prev, tiles: snapshotTiles };
     });
+  };
+
+  const onPlacementsDragEnd = () => {
+    placementDragSnapshotRef.current = null;
   };
 
   const loadFile = async (file: File) => {
@@ -463,6 +610,7 @@ export function App() {
       replace(parsed, true);
       setSelectedObject(-1);
       setSelectedPlacement(-1);
+      setSelectedPlacements(new Set());
       setMapRevision((v) => v + 1);
       setStatus(`Loaded ${file.name}`);
     } catch (error) {
@@ -504,6 +652,7 @@ export function App() {
           replace(createBlankLevel());
           setSelectedObject(-1);
           setSelectedPlacement(-1);
+          setSelectedPlacements(new Set());
           setMapRevision((v) => v + 1);
           setStatus("New blank level");
         }}
@@ -512,27 +661,24 @@ export function App() {
       />
 
       <div className={`editor-main ${showJson ? "with-json" : ""}`}>
-        <ToolRail
-          mode={mode}
-          tileTool={tileTool}
-          collisionTool={collisionTool}
-          fluidTool={fluidTool}
-          objectTool={objectTool}
-          onModeChange={setMode}
-          onTileToolChange={setTileTool}
-          onCollisionToolChange={setCollisionTool}
-          onFluidToolChange={setFluidTool}
-          onObjectToolChange={setObjectTool}
-        />
+        <ToolRail mode={mode} onModeChange={setMode} />
 
         <div className="editor-center">
-          <OptionsBar mode={mode} brushSize={brushSize} onBrushSizeChange={setBrushSize} />
+          <OptionsBar
+            mode={mode}
+            gridTool={gridTool}
+            objectTool={objectTool}
+            fluidPaint={fluidPaint}
+            brushSize={brushSize}
+            onGridToolChange={setGridTool}
+            onObjectToolChange={setObjectTool}
+            onFluidPaintChange={setFluidPaint}
+            onBrushSizeChange={setBrushSize}
+          />
           <LevelCanvas
             level={level}
             mode={mode}
-            tileTool={tileTool}
-            collisionTool={collisionTool}
-            fluidTool={fluidTool}
+            gridTool={gridTool}
             objectTool={objectTool}
             brushSize={brushSize}
             activeTilesetId={activeTilesetId}
@@ -540,13 +686,19 @@ export function App() {
             tilesetImages={tilesetImages}
             selectedObject={selectedObject}
             selectedPlacement={selectedPlacement}
+            selectedPlacements={selectedPlacements}
             backgroundImage={backgroundImage}
             mapRevision={mapRevision}
             onPointer={onCanvasPointer}
             onStrokeBegin={beginStroke}
             onStrokeEnd={endStroke}
             onObjectDrag={onObjectDrag}
-            onPlacementDrag={onPlacementDrag}
+            onPlacementsDrag={onPlacementsDrag}
+            onPlacementsDragEnd={onPlacementsDragEnd}
+            onMarqueeSelect={onMarqueeSelect}
+            onLineTool={onLineTool}
+            onFillTool={onFillTool}
+            onTilePick={onTilePick}
           />
           {mode === "tiles" && (
             <TilesetDock
@@ -569,6 +721,9 @@ export function App() {
           mode={mode}
           selected={selected}
           selectedPlacement={selectedPlacement}
+          selectedPlacementCount={
+            selectedPlacements.size > 0 ? selectedPlacements.size : selectedPlacement >= 0 ? 1 : 0
+          }
           tilesets={tilesets}
           tilesetImages={tilesetImages}
           backgroundAssets={pack.backgrounds}
