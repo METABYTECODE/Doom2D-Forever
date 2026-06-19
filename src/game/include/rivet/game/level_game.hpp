@@ -8,6 +8,8 @@
 #include <rivet/game/level_scene.hpp>
 #include <rivet/game/level/level_data.hpp>
 #include <rivet/game/tileset/tileset_catalog.hpp>
+#include <rivet/game/resources/resource_pack.hpp>
+#include <rivet/physics/fluid_grid.hpp>
 
 namespace rivet::game {
 
@@ -27,14 +29,19 @@ private:
         rivet::core::GameContext& context,
         float player_center_x,
         float player_center_y) const;
+    void draw_level_background(rivet::render::IRenderer& renderer, const LevelScene& scene) const;
     void draw_level_tiles(rivet::render::IRenderer& renderer, const level::LevelData& data, float animation_time);
+    void update_patrols(rivet::ecs::World& world, const std::vector<rivet::ecs::Entity>& patrols);
 
     std::filesystem::path level_path_;
     level::LevelData level_;
-    rivet::physics::PhysicsWorld physics_;
+    rivet::physics::FluidGrid fluids_;
     rivet::resources::TextureHandle player_texture_ = rivet::resources::kInvalidTexture;
+    rivet::resources::TextureHandle background_texture_ = rivet::resources::kInvalidTexture;
     std::unique_ptr<tileset::TilesetCatalog> tilesets_;
+    std::optional<resources::ResourcePack> resource_pack_;
     std::filesystem::path assets_root_;
+    std::filesystem::path music_path_;
     float animation_time_ = 0.0f;
 
     struct PlayerMotion {

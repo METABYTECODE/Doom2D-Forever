@@ -3,14 +3,19 @@ import { DEFAULT_FRAME_MS, type PlacedTile } from "../types/level";
 import type {
   CollisionTool,
   EditorMode,
+  FluidTool,
   LevelData,
   LevelObject,
   ObjectTool,
+  PaintFluidOption,
   TileTool,
 } from "../types/level";
 import { isAnimatedPlacement, placementFrames as getPlacementFrames } from "../lib/tile-animation";
+import { clampBrushSize } from "../lib/brush";
 import type { TilesetDef } from "../types/tileset";
 import { TilePreview } from "./TilePreview";
+import { ContentAssetField } from "./ContentAssetField";
+import type { PackAsset } from "../lib/resource-pack";
 
 interface MenuProps {
   dirty: boolean;
@@ -74,10 +79,12 @@ interface ToolRailProps {
   mode: EditorMode;
   tileTool: TileTool;
   collisionTool: CollisionTool;
+  fluidTool: FluidTool;
   objectTool: ObjectTool;
   onModeChange: (mode: EditorMode) => void;
   onTileToolChange: (tool: TileTool) => void;
   onCollisionToolChange: (tool: CollisionTool) => void;
+  onFluidToolChange: (tool: FluidTool) => void;
   onObjectToolChange: (tool: ObjectTool) => void;
 }
 
@@ -85,18 +92,27 @@ export function ToolRail({
   mode,
   tileTool,
   collisionTool,
+  fluidTool,
   objectTool,
   onModeChange,
   onTileToolChange,
   onCollisionToolChange,
+  onFluidToolChange,
   onObjectToolChange,
 }: ToolRailProps) {
   const subTool =
-    mode === "tiles" ? tileTool : mode === "collision" ? collisionTool : objectTool;
+    mode === "tiles"
+      ? tileTool
+      : mode === "collision"
+        ? collisionTool
+        : mode === "fluids"
+          ? fluidTool
+          : objectTool;
 
   const setSubTool = (id: string) => {
     if (mode === "tiles") onTileToolChange(id as TileTool);
     else if (mode === "collision") onCollisionToolChange(id as CollisionTool);
+    else if (mode === "fluids") onFluidToolChange(id as FluidTool);
     else onObjectToolChange(id as ObjectTool);
   };
 
@@ -112,11 +128,18 @@ export function ToolRail({
             { id: "paint", label: "Solid", icon: "■" },
             { id: "erase", label: "Clear", icon: "□" },
           ]
-        : [
-            { id: "select", label: "Select", icon: "↖" },
-            { id: "place-player", label: "Player", icon: "P" },
-            { id: "place-block", label: "Block", icon: "B" },
-          ];
+        : mode === "fluids"
+          ? [
+              { id: "water", label: "Water", icon: "≈" },
+              { id: "acid", label: "Acid", icon: "☣" },
+              { id: "lava", label: "Lava", icon: "♨" },
+              { id: "erase", label: "Clear", icon: "□" },
+            ]
+          : [
+              { id: "select", label: "Select", icon: "↖" },
+              { id: "place-player", label: "Player", icon: "P" },
+              { id: "place-block", label: "Block", icon: "B" },
+            ];
 
   return (
     <aside className="tool-rail">
@@ -138,6 +161,15 @@ export function ToolRail({
         >
           <span className="tool-icon">⬚</span>
           <span>Collide</span>
+        </button>
+        <button
+          type="button"
+          className={mode === "fluids" ? "active" : ""}
+          title="Fluids (F)"
+          onClick={() => onModeChange("fluids")}
+        >
+          <span className="tool-icon">≈</span>
+          <span>Fluids</span>
         </button>
         <button
           type="button"
@@ -167,13 +199,56 @@ export function ToolRail({
   );
 }
 
+interface OptionsBarProps {
+  mode: EditorMode;
+  brushSize: number;
+  onBrushSizeChange: (size: number) => void;
+}
+
+export function OptionsBar({ mode, brushSize, onBrushSizeChange }: OptionsBarProps) {
+  if (mode !== "collision" && mode !== "fluids") {
+    return null;
+  }
+
+  const size = clampBrushSize(brushSize);
+
+  return (
+    <div className="options-bar">
+      <label className="options-field">
+        <span>Brush size</span>
+        <input
+          type="range"
+          min={1}
+          max={16}
+          value={size}
+          onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
+        />
+        <input
+          type="number"
+          min={1}
+          max={16}
+          value={size}
+          onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
+        />
+      </label>
+      <span className="options-hint">
+        {size}×{size} cells
+      </span>
+    </div>
+  );
+}
+
 interface TilesetDockProps {
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
   activeTilesetId: string;
   selectedTileId: number;
+  paintCollision: boolean;
+  paintFluid: PaintFluidOption;
   onTilesetChange: (id: string) => void;
   onOpenPicker: () => void;
+  onPaintCollisionChange: (value: boolean) => void;
+  onPaintFluidChange: (value: PaintFluidOption) => void;
 }
 
 export function TilesetDock({
@@ -181,8 +256,12 @@ export function TilesetDock({
   tilesetImages,
   activeTilesetId,
   selectedTileId,
+  paintCollision,
+  paintFluid,
   onTilesetChange,
   onOpenPicker,
+  onPaintCollisionChange,
+  onPaintFluidChange,
 }: TilesetDockProps) {
   const tileset = tilesets.get(activeTilesetId) ?? null;
   const image = tilesetImages.get(activeTilesetId) ?? null;
@@ -203,6 +282,28 @@ export function TilesetDock({
         <TilePreview tileset={tileset} image={image} tileId={selectedTileId} />
         <span className="tile-preview-hint">Click to open atlas · tile #{selectedTileId}</span>
       </button>
+      <div className="dock-layers">
+        <label className="check-row dock-check">
+          <input
+            type="checkbox"
+            checked={paintCollision}
+            onChange={(e) => onPaintCollisionChange(e.target.checked)}
+          />
+          Collision
+        </label>
+        <label className="dock-label dock-fluid">
+          Fluid
+          <select
+            value={paintFluid}
+            onChange={(e) => onPaintFluidChange(e.target.value as PaintFluidOption)}
+          >
+            <option value="none">None</option>
+            <option value="water">Water</option>
+            <option value="acid">Acid</option>
+            <option value="lava">Lava</option>
+          </select>
+        </label>
+      </div>
     </footer>
   );
 }
@@ -214,6 +315,8 @@ interface InspectorProps {
   selectedPlacement: number;
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
+  backgroundAssets: PackAsset[];
+  soundAssets: PackAsset[];
   snapGrid: boolean;
   onLevelPatch: (patch: Partial<LevelData>) => void;
   onResizeMap: (w: number, h: number) => void;
@@ -232,6 +335,8 @@ export function Inspector({
   selectedPlacement,
   tilesets,
   tilesetImages,
+  backgroundAssets,
+  soundAssets,
   snapGrid,
   onLevelPatch,
   onResizeMap,
@@ -288,22 +393,27 @@ export function Inspector({
         <p className="hint mono">
           {level.width}×{level.height} cells · {level.width * level.grid_size}px wide
         </p>
-        <label>
-          Background
-          <input
-            value={level.background}
-            onChange={(e) => onLevelPatch({ background: e.target.value })}
-            placeholder="path/to/sky.png"
-          />
-        </label>
-        <label>
-          Music
-          <input
-            value={level.music}
-            onChange={(e) => onLevelPatch({ music: e.target.value })}
-            placeholder="path/to/track.ogg"
-          />
-        </label>
+        <p className="hint">
+          Resource pack: <span className="mono">{level.resource_pack || "dev"}</span>
+          {" · "}
+          {tilesets.size} tilesets, {backgroundAssets.length} backgrounds, {soundAssets.length} tracks
+        </p>
+        <ContentAssetField
+          label="Background"
+          value={level.background}
+          assets={backgroundAssets}
+          variant="image"
+          emptyHint="Add images to src/resourcepacks/dev/textures/backgrounds/"
+          onChange={(background) => onLevelPatch({ background })}
+        />
+        <ContentAssetField
+          label="Music"
+          value={level.music}
+          assets={soundAssets}
+          variant="audio"
+          emptyHint="Add tracks to src/resourcepacks/dev/audio/music/"
+          onChange={(music) => onLevelPatch({ music })}
+        />
         <label className="check-row">
           <input
             type="checkbox"

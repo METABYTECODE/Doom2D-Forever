@@ -1,4 +1,4 @@
-import { LEVEL_FORMAT, LEVEL_VERSION, type LevelData } from "../types/level";
+import { FLUID_NONE, LEVEL_FORMAT, LEVEL_VERSION, type LevelData } from "../types/level";
 
 export function validateLevel(level: LevelData): string[] {
   const errors: string[] = [];
@@ -15,6 +15,22 @@ export function validateLevel(level: LevelData): string[] {
     if (level.collision[y].length !== level.width) {
       errors.push(`Collision row ${y} width mismatch`);
       break;
+    }
+  }
+  if (level.fluids.length !== level.height) {
+    errors.push(`Fluids rows (${level.fluids.length}) != height (${level.height})`);
+  }
+  for (let y = 0; y < level.fluids.length; y++) {
+    if (level.fluids[y].length !== level.width) {
+      errors.push(`Fluids row ${y} width mismatch`);
+      break;
+    }
+    for (let x = 0; x < level.fluids[y].length; x++) {
+      const cell = level.fluids[y][x];
+      if (cell < FLUID_NONE || cell > 3) {
+        errors.push(`Invalid fluid value ${cell} at ${x},${y}`);
+        break;
+      }
     }
   }
 

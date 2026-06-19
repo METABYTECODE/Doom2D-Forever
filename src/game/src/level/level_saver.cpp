@@ -4,10 +4,22 @@
 #include <nlohmann/json.hpp>
 
 #include <rivet/game/level/level_saver.hpp>
+#include <rivet/game/resources/resource_pack.hpp>
 
 namespace rivet::game::level {
 
 namespace {
+
+[[nodiscard]] bool fluids_grid_has_content(const std::vector<std::vector<int>>& fluids) {
+    for (const auto& row : fluids) {
+        for (const int cell : row) {
+            if (cell != kFluidNone) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 [[nodiscard]] nlohmann::json object_to_json(const LevelObject& object) {
     nlohmann::json json = {
@@ -52,6 +64,18 @@ namespace {
     return json;
 }
 
+[[nodiscard]] bool fluids_grid_matches(const LevelData& level) {
+    if (static_cast<int>(level.fluids.size()) != level.height) {
+        return false;
+    }
+    for (const auto& row : level.fluids) {
+        if (static_cast<int>(row.size()) != level.width) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 void save_level(const std::filesystem::path& path, const LevelData& level) {
@@ -74,11 +98,18 @@ void save_level(const std::filesystem::path& path, const LevelData& level) {
         {"objects", nlohmann::json::array()},
     };
 
+    if (fluids_grid_matches(level) && fluids_grid_has_content(level.fluids)) {
+        json["fluids"] = level.fluids;
+    }
+
     if (!level.background.empty()) {
         json["background"] = level.background;
     }
     if (!level.music.empty()) {
         json["music"] = level.music;
+    }
+    if (level.resource_pack != resources::kDefaultPackId) {
+        json["resource_pack"] = level.resource_pack;
     }
 
     for (const auto& tile : level.tiles) {

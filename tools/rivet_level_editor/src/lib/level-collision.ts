@@ -36,15 +36,18 @@ export function resizeLevel(level: LevelData, width: number, height: number): Le
   const nextWidth = clampMapSize(width);
   const nextHeight = clampMapSize(height);
 
-  const tiles = level.tiles.filter((tile) => {
-    return tile.x < nextWidth && tile.y < nextHeight;
-  });
+  const tiles = level.tiles.filter((tile) => tile.x < nextWidth && tile.y < nextHeight);
+
+  const collision = Array.from({ length: nextHeight }, (_, y) =>
+    Array.from({ length: nextWidth }, (_, x) => level.collision[y]?.[x] ?? 0),
+  );
 
   return ensureLevelCollision({
     ...level,
     width: nextWidth,
     height: nextHeight,
     tiles,
+    collision,
   });
 }
 

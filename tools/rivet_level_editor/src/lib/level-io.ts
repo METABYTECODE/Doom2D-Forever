@@ -8,9 +8,12 @@ import {
   type PlacedTile,
   type TileFrame,
 } from "../types/level";
-import { ensureLevelCollision, emptyCollision, paintCollisionBorder } from "./level-collision";
+import { DEFAULT_PACK_ID } from "./resource-pack";
+import { emptyCollision, paintCollisionBorder } from "./level-collision";
+import { emptyFluids } from "./level-fluids";
+import { ensureLevelGrids, resizeLevel } from "./level-grids";
 
-export { ensureLevelCollision, resizeLevel } from "./level-collision";
+export { ensureLevelGrids, resizeLevel };
 
 export function createBlankLevel(width = 80, height = 60): LevelData {
   const level: LevelData = {
@@ -20,10 +23,12 @@ export function createBlankLevel(width = 80, height = 60): LevelData {
     grid_size: GRID_SIZE,
     width,
     height,
+    resource_pack: DEFAULT_PACK_ID,
     background: "",
     music: "",
     tiles: [],
     collision: emptyCollision(width, height),
+    fluids: emptyFluids(width, height),
     objects: [],
   };
   return paintCollisionBorder(level);
@@ -94,17 +99,19 @@ function convertLegacyLevel(raw: Record<string, unknown>): LevelData {
     ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
     : [];
 
-  return ensureLevelCollision({
+  return ensureLevelGrids({
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: String(raw.name ?? "level"),
     grid_size: GRID_SIZE,
     width,
     height,
+    resource_pack: DEFAULT_PACK_ID,
     background: "",
     music: "",
     tiles: [],
     collision,
+    fluids: emptyFluids(width, height),
     objects,
   });
 }
@@ -134,21 +141,27 @@ export function parseLevelJson(text: string): LevelData {
     ? (raw.collision as number[][])
     : emptyCollision(width, height);
 
+  const fluids = Array.isArray(raw.fluids)
+    ? (raw.fluids as number[][])
+    : emptyFluids(width, height);
+
   const objects = Array.isArray(raw.objects)
     ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
     : [];
 
-  return ensureLevelCollision({
+  return ensureLevelGrids({
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
     name: String(raw.name ?? "level"),
     grid_size: Number(raw.grid_size ?? GRID_SIZE),
     width,
     height,
+    resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),
     background: String(raw.background ?? ""),
     music: String(raw.music ?? ""),
     tiles,
     collision,
+    fluids,
     objects,
   });
 }
@@ -181,8 +194,12 @@ function placedTileToJson(tile: PlacedTile): Record<string, unknown> {
   return json;
 }
 
+function fluidsGridHasContent(fluids: number[][]): boolean {
+  return fluids.some((row) => row.some((cell) => cell !== 0));
+}
+
 export function serializeLevel(level: LevelData): string {
-  const normalized = ensureLevelCollision(level);
+  const normalized = ensureLevelGrids(level);
   const json: Record<string, unknown> = {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
@@ -194,8 +211,14 @@ export function serializeLevel(level: LevelData): string {
     collision: normalized.collision,
     objects: normalized.objects.map(objectToJson),
   };
+  if (fluidsGridHasContent(normalized.fluids)) {
+    json.fluids = normalized.fluids;
+  }
   if (normalized.background) json.background = normalized.background;
   if (normalized.music) json.music = normalized.music;
+  if (normalized.resource_pack !== DEFAULT_PACK_ID) {
+    json.resource_pack = normalized.resource_pack;
+  }
   return `${JSON.stringify(json, null, 2)}\n`;
 }
 

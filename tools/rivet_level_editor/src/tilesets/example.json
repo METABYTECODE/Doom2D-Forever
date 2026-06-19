@@ -1,7 +1,0 @@
-{
-  "name": "Example 8×8",
-  "texture": "example.svg",
-  "tile_width": 8,
-  "tile_height": 8,
-  "columns": 8
-}

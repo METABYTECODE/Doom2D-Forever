@@ -1,9 +1,10 @@
 import type { TilesetDef } from "../types/tileset";
 import { GRID_SIZE } from "../types/level";
 
-export function tileCellSpan(tileset: TilesetDef): { w: number; h: number } {
-  const w = Math.max(1, Math.round(tileset.tile_width / GRID_SIZE));
-  const h = Math.max(1, Math.round(tileset.tile_height / GRID_SIZE));
+export function tileCellSpan(tileset: TilesetDef, gridSize: number = GRID_SIZE): { w: number; h: number } {
+  const cell = gridSize > 0 ? gridSize : GRID_SIZE;
+  const w = Math.max(1, Math.round(tileset.tile_width / cell));
+  const h = Math.max(1, Math.round(tileset.tile_height / cell));
   return { w, h };
 }
 

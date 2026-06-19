@@ -1,6 +1,7 @@
 #include <fstream>
 #include <stdexcept>
 
+#include <cmath>
 #include <nlohmann/json.hpp>
 
 #include <rivet/game/tileset/tileset_catalog.hpp>
@@ -44,7 +45,7 @@ TilesetCatalog::TilesetCatalog(
         return;
     }
 
-    for (const auto& entry : std::filesystem::directory_iterator(tilesets_dir)) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(tilesets_dir)) {
         if (!entry.is_regular_file() || entry.path().extension() != ".json") {
             continue;
         }
@@ -55,6 +56,13 @@ TilesetCatalog::TilesetCatalog(
             // Skip broken tilesets; game can still run with partial content.
         }
     }
+}
+
+int tile_cell_span(const int tile_pixels, const int grid_size) {
+    if (grid_size <= 0) {
+        return 1;
+    }
+    return std::max(1, static_cast<int>(std::lround(static_cast<double>(tile_pixels) / grid_size)));
 }
 
 const TilesetDef* TilesetCatalog::find(const std::string& id) const {

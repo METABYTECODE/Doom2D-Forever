@@ -4,6 +4,7 @@
 
 #include <rivet/game/bounce_game.hpp>
 #include <rivet/game/bounce_scene.hpp>
+#include <rivet/physics/physics_world.hpp>
 
 namespace rivet::game {
 
@@ -49,13 +50,15 @@ constexpr float kMoveSpeed = 280.0f;
 void BounceGame::on_attach(rivet::core::GameContext& context) {
     context.scenes().push(std::make_unique<BounceScene>());
 
-    physics_.set_world_bounds({
-        .min_x = 0.0f,
-        .min_y = 0.0f,
-        .max_x = kArenaWidth - kPlayerSize,
-        .max_y = kArenaHeight - kPlayerSize,
-        .enabled = true,
-    });
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().set_world_bounds({
+            .min_x = 0.0f,
+            .min_y = 0.0f,
+            .max_x = kArenaWidth - kPlayerSize,
+            .max_y = kArenaHeight - kPlayerSize,
+            .enabled = true,
+        });
+    }
 
     player_texture_ = create_stripe_texture(context);
 
@@ -69,9 +72,10 @@ void BounceGame::on_attach(rivet::core::GameContext& context) {
 }
 
 void BounceGame::on_detach(rivet::core::GameContext& context) {
-    (void)context;
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().clear();
+    }
     player_texture_ = rivet::resources::kInvalidTexture;
-    physics_.clear();
 }
 
 void BounceGame::on_update(rivet::core::GameContext& context, float delta_time) {
@@ -79,7 +83,10 @@ void BounceGame::on_update(rivet::core::GameContext& context, float delta_time) 
     if (context.input().is_key_pressed(rivet::input::Key::Escape)) {
         context.request_quit();
     }
+}
 
+void BounceGame::on_fixed_update(rivet::core::GameContext& context, float fixed_delta_time) {
+    (void)fixed_delta_time;
     auto* scene = active_bounce(context);
     if (scene == nullptr) {
         return;
@@ -89,14 +96,10 @@ void BounceGame::on_update(rivet::core::GameContext& context, float delta_time) 
         scene->world().registry().get<rivet::ecs::components::Velocity>(scene->player_entity());
     velocity.x = context.input().state().move_x * kMoveSpeed;
     velocity.y = context.input().state().move_y * kMoveSpeed;
-}
 
-void BounceGame::on_fixed_update(rivet::core::GameContext& context, float fixed_delta_time) {
-    auto* scene = active_bounce(context);
-    if (scene == nullptr) {
-        return;
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().step(scene->world(), fixed_delta_time);
     }
-    physics_.step(scene->world(), fixed_delta_time);
 }
 
 void BounceGame::on_render(rivet::core::GameContext& context, float interpolation_alpha) {

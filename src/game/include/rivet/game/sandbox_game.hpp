@@ -13,7 +13,6 @@ public:
     void on_render(rivet::core::GameContext& context, float interpolation_alpha) override;
 
 private:
-    rivet::physics::PhysicsWorld physics_;
     rivet::resources::TextureHandle player_texture_ = rivet::resources::kInvalidTexture;
 };
 

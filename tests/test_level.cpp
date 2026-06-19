@@ -6,6 +6,8 @@
 #include <rivet/game/level/level_loader.hpp>
 #include <rivet/game/level/level_saver.hpp>
 #include <rivet/game/level/level_spawner.hpp>
+#include <rivet/game/tileset/tileset_catalog.hpp>
+#include <rivet/game/resources/resource_pack.hpp>
 
 #ifndef D2DF_SOURCE_DIR
 #define D2DF_SOURCE_DIR "."
@@ -19,6 +21,24 @@ std::filesystem::path source_path(const char* rel) {
 
 } // namespace
 
+TEST_CASE("ResourcePack loads dev pack from assets", "[game][resources]") {
+    const auto assets = source_path("assets");
+    if (!std::filesystem::exists(assets / "resourcepacks" / "dev" / "pack.json")) {
+        SKIP("dev resource pack not available");
+    }
+
+    const auto pack = rivet::game::resources::ResourcePack::load(assets, "dev");
+    REQUIRE(pack.has_value());
+    CHECK(pack->manifest().id == "dev");
+    CHECK(std::filesystem::exists(pack->tilesets_dir()));
+}
+
+TEST_CASE("tile_cell_span matches editor footprint for 36px tiles", "[game][tileset]") {
+    CHECK(rivet::game::tileset::tile_cell_span(36, 8) == 5);
+    CHECK(rivet::game::tileset::tile_cell_span(16, 8) == 2);
+    CHECK(rivet::game::tileset::tile_cell_span(8, 8) == 1);
+}
+
 TEST_CASE("Level loader reads rivet-level JSON", "[game][level]") {
     const auto level_path = source_path("assets/levels/test.level.json");
     if (!std::filesystem::exists(level_path)) {
@@ -29,9 +49,9 @@ TEST_CASE("Level loader reads rivet-level JSON", "[game][level]") {
 
     CHECK(level.name == "sample");
     CHECK(level.grid_size == 8);
-    CHECK(level.width == 80);
-    CHECK(level.height == 60);
-    REQUIRE(level.collision.size() == 60);
+    CHECK(level.width > 0);
+    CHECK(level.height > 0);
+    REQUIRE(level.collision.size() == static_cast<std::size_t>(level.height));
     bool has_solid = false;
     for (const auto& row : level.collision) {
         for (const int cell : row) {

@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-  <rect width="64" height="64" fill="#1a1e28"/>
-  <rect x="0" y="0" width="8" height="8" fill="#2f5a48"/>
-  <rect x="8" y="0" width="8" height="8" fill="#3a6a55"/>
-  <rect x="16" y="0" width="8" height="8" fill="#5a4038"/>
-  <rect x="24" y="0" width="8" height="8" fill="#6a5040"/>
-</svg>

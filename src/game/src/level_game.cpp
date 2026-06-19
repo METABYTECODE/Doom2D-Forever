@@ -5,63 +5,38 @@
 #include <cmath>
 
 #include <rivet/ecs/components/collider.hpp>
+#include <rivet/ecs/components/physics_contacts.hpp>
 #include <rivet/ecs/components/transform.hpp>
-#include <rivet/game/content/content_paths.hpp>
+#include <rivet/game/resources/resource_pack.hpp>
+#include <spdlog/spdlog.h>
 #include <rivet/game/level/level_loader.hpp>
 #include <rivet/input/keys.hpp>
 #include <rivet/physics/aabb.hpp>
+#include <rivet/physics/fluid_grid.hpp>
+#include <rivet/physics/physics_world.hpp>
+#include <rivet/physics/tile_collider.hpp>
+#include <rivet/game/tileset/tileset_catalog.hpp>
 
 namespace rivet::game {
 
 namespace {
 
-constexpr float kMoveSpeed = 280.0f;
-constexpr float kGravity = 1100.0f;
-constexpr float kJumpSpeed = 380.0f;
-constexpr float kMaxFallSpeed = 640.0f;
-constexpr float kGroundTolerance = 6.0f;
+constexpr float kMoveSpeed = 288.0f;
+constexpr float kMoveAccel = 1800.0f;
+constexpr float kMoveDecel = 2400.0f;
+constexpr float kGravity = 648.0f;
+constexpr float kJumpSpeed = 360.0f;
+constexpr float kMaxFallSpeed = 1080.0f;
 constexpr float kJumpBufferTime = 0.12f;
 constexpr float kCoyoteTime = 0.1f;
+constexpr float kWaterGravity = 180.0f;
+constexpr float kWaterMaxFallSpeed = 216.0f;
+constexpr float kSwimSpeed = 144.0f;
+constexpr float kWaterDrag = 10.0f;
 constexpr float kDefaultZoom = 2.0f;
 
 [[nodiscard]] float snap_world(const float value) {
     return std::round(value * kDefaultZoom) / kDefaultZoom;
-}
-
-[[nodiscard]] bool is_grounded(
-    rivet::ecs::World& world,
-    const rivet::ecs::Entity player,
-    const rivet::ecs::components::Transform& transform,
-    const rivet::ecs::components::Collider& collider) {
-    const rivet::physics::Aabb player_box = rivet::physics::make_aabb(transform, collider);
-    const float feet_y = transform.y + collider.height;
-    constexpr float kSideInset = 2.0f;
-    const float probe_left = player_box.x + kSideInset;
-    const float probe_right = player_box.x + player_box.width - kSideInset;
-
-    const auto static_view =
-        world.registry().view<rivet::ecs::components::Transform, rivet::ecs::components::Collider>();
-    for (const auto entity : static_view) {
-        if (entity == player) {
-            continue;
-        }
-        const auto& other_collider = static_view.get<rivet::ecs::components::Collider>(entity);
-        if (!other_collider.is_static) {
-            continue;
-        }
-        const auto& other_transform = static_view.get<rivet::ecs::components::Transform>(entity);
-        const rivet::physics::Aabb other_box = rivet::physics::make_aabb(other_transform, other_collider);
-
-        if (probe_right <= other_box.x || probe_left >= other_box.x + other_box.width) {
-            continue;
-        }
-
-        const float gap = other_box.y - feet_y;
-        if (gap >= -1.5f && gap <= kGroundTolerance) {
-            return true;
-        }
-    }
-    return false;
 }
 
 [[nodiscard]] LevelScene* active_level(rivet::core::GameContext& context) {
@@ -78,6 +53,30 @@ constexpr float kDefaultZoom = 2.0f;
     };
 }
 
+void apply_horizontal_accel(
+    float& velocity_x,
+    const float target_x,
+    const float fixed_delta_time) {
+    if (velocity_x < target_x) {
+        velocity_x = std::min(target_x, velocity_x + kMoveAccel * fixed_delta_time);
+    } else if (velocity_x > target_x) {
+        velocity_x = std::max(target_x, velocity_x - kMoveDecel * fixed_delta_time);
+    }
+}
+
+void apply_drag(float& velocity, const float drag, const float fixed_delta_time) {
+    if (std::abs(velocity) <= 1.0f) {
+        velocity = 0.0f;
+        return;
+    }
+
+    if (velocity > 0.0f) {
+        velocity = std::max(0.0f, velocity - drag * fixed_delta_time);
+    } else {
+        velocity = std::min(0.0f, velocity + drag * fixed_delta_time);
+    }
+}
+
 } // namespace
 
 LevelGame::LevelGame(std::filesystem::path level_path)
@@ -85,36 +84,66 @@ LevelGame::LevelGame(std::filesystem::path level_path)
 
 void LevelGame::on_attach(rivet::core::GameContext& context) {
     level_ = level::load_level(level_path_);
+    fluids_ = rivet::physics::FluidGrid::from_grid(
+        level_.fluids,
+        static_cast<float>(level_.grid_size));
     context.scenes().push(std::make_unique<LevelScene>(level_));
 
-    if (auto* scene = active_level(context)) {
-        float bounds_margin_x = 48.0f;
-        float bounds_margin_y = 48.0f;
-        if (scene->player_entity() != rivet::ecs::kNullEntity) {
-            const auto& collider = scene->world().registry().get<rivet::ecs::components::Collider>(
-                scene->player_entity());
-            bounds_margin_x = collider.width;
-            bounds_margin_y = collider.height;
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        auto& physics = context.service<rivet::physics::PhysicsWorld>();
+        physics.clear();
+        physics.set_tile_collider(rivet::physics::TileCollider::from_grid(
+            level_.collision,
+            static_cast<float>(level_.grid_size)));
+        physics.set_broadphase_cell_size(static_cast<float>(level_.grid_size));
+
+        if (auto* scene = active_level(context)) {
+            float bounds_margin_x = 48.0f;
+            float bounds_margin_y = 48.0f;
+            if (scene->player_entity() != rivet::ecs::kNullEntity) {
+                const auto& collider = scene->world().registry().get<rivet::ecs::components::Collider>(
+                    scene->player_entity());
+                bounds_margin_x = collider.width;
+                bounds_margin_y = collider.height;
+            }
+            physics.set_world_bounds({
+                .min_x = 0.0f,
+                .min_y = 0.0f,
+                .max_x = scene->world_width() - bounds_margin_x,
+                .max_y = scene->world_height() - bounds_margin_y,
+                .enabled = true,
+            });
         }
-        physics_.set_world_bounds({
-            .min_x = 0.0f,
-            .min_y = 0.0f,
-            .max_x = scene->world_width() - bounds_margin_x,
-            .max_y = scene->world_height() - bounds_margin_y,
-            .enabled = true,
-        });
     }
 
-    if (const auto assets = content::resolve_assets_root()) {
+    if (const auto assets = resources::resolve_assets_root()) {
         assets_root_ = *assets;
+        resource_pack_ = resources::ResourcePack::load(assets_root_, level_.resource_pack);
     }
 
     if (context.has_service<rivet::resources::ResourceManager>()) {
         auto& resources = context.service<rivet::resources::ResourceManager>();
-        if (!assets_root_.empty()) {
+        if (resource_pack_) {
             tilesets_ = std::make_unique<tileset::TilesetCatalog>(
                 resources,
-                content::tilesets_dir(assets_root_));
+                resource_pack_->tilesets_dir());
+
+            if (!level_.background.empty()) {
+                if (const auto bg_path = resource_pack_->resolve_background(level_.background)) {
+                    background_texture_ = resources.load_texture(*bg_path);
+                } else {
+                    spdlog::warn("Background asset not found: {}", level_.background);
+                }
+            }
+
+            if (!level_.music.empty()) {
+                if (const auto resolved_music = resource_pack_->resolve_music(level_.music)) {
+                    music_path_ = *resolved_music;
+                    spdlog::info("Level music: {} ({})", level_.music, music_path_.string());
+                } else {
+                    spdlog::warn("Music asset not found: {}", level_.music);
+                }
+            }
         }
         player_texture_ = resources.create_checkerboard(64, 8, "player");
     }
@@ -136,10 +165,15 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
 }
 
 void LevelGame::on_detach(rivet::core::GameContext& context) {
-    (void)context;
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().clear();
+    }
     tilesets_.reset();
     player_texture_ = rivet::resources::kInvalidTexture;
-    physics_.clear();
+    background_texture_ = rivet::resources::kInvalidTexture;
+    resource_pack_.reset();
+    music_path_.clear();
+    fluids_ = {};
     player_grounded_ = false;
     jump_buffer_time_ = 0.0f;
     coyote_time_ = 0.0f;
@@ -173,6 +207,23 @@ void LevelGame::update_camera(
     renderer.set_camera(camera);
 }
 
+void LevelGame::update_patrols(
+    rivet::ecs::World& world,
+    const std::vector<rivet::ecs::Entity>& patrols) {
+    for (const auto entity : patrols) {
+        if (!world.registry().all_of<
+                rivet::ecs::components::Velocity,
+                rivet::ecs::components::PhysicsContacts>(entity)) {
+            continue;
+        }
+        auto& velocity = world.registry().get<rivet::ecs::components::Velocity>(entity);
+        const auto& contacts = world.registry().get<rivet::ecs::components::PhysicsContacts>(entity);
+        if (contacts.wall_left || contacts.wall_right) {
+            velocity.x = -velocity.x;
+        }
+    }
+}
+
 void LevelGame::on_update(rivet::core::GameContext& context, float delta_time) {
     if (context.input().is_key_pressed(rivet::input::Key::Escape)) {
         context.request_quit();
@@ -192,47 +243,86 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
         return;
     }
 
-    if (scene->player_entity() != rivet::ecs::kNullEntity) {
-        auto& registry = scene->world().registry();
-        auto& velocity = registry.get<rivet::ecs::components::Velocity>(scene->player_entity());
-
-        velocity.x = context.input().state().move_x * kMoveSpeed;
-        velocity.y += kGravity * fixed_delta_time;
-        velocity.y = std::min(velocity.y, kMaxFallSpeed);
-
-        const bool can_jump = player_grounded_ || coyote_time_ > 0.0f;
-        if (can_jump && jump_buffer_time_ > 0.0f) {
-            velocity.y = -kJumpSpeed;
-            jump_buffer_time_ = 0.0f;
-            coyote_time_ = 0.0f;
-        }
-    }
-
-    physics_.step(scene->world(), fixed_delta_time);
+    update_patrols(scene->world(), scene->patrol_entities());
 
     if (scene->player_entity() != rivet::ecs::kNullEntity) {
         auto& registry = scene->world().registry();
-        auto& transform = registry.get<rivet::ecs::components::Transform>(scene->player_entity());
-        auto& velocity = registry.get<rivet::ecs::components::Velocity>(scene->player_entity());
-        const auto& collider = registry.get<rivet::ecs::components::Collider>(scene->player_entity());
 
-        const bool grounded = is_grounded(scene->world(), scene->player_entity(), transform, collider);
-        if (grounded && velocity.y > 0.0f) {
-            velocity.y = 0.0f;
+        if (registry.all_of<rivet::ecs::components::PhysicsContacts>(scene->player_entity())) {
+            player_grounded_ =
+                registry.get<rivet::ecs::components::PhysicsContacts>(scene->player_entity()).floor;
+        } else {
+            player_grounded_ = false;
         }
-
-        if (grounded) {
+        if (player_grounded_) {
             coyote_time_ = kCoyoteTime;
         } else {
             coyote_time_ = std::max(0.0f, coyote_time_ - fixed_delta_time);
         }
-        player_grounded_ = grounded;
 
+        auto& velocity = registry.get<rivet::ecs::components::Velocity>(scene->player_entity());
+        const auto& transform = registry.get<rivet::ecs::components::Transform>(scene->player_entity());
+        const auto& collider = registry.get<rivet::ecs::components::Collider>(scene->player_entity());
+
+        const auto fluid_sample = fluids_.sample_aabb(rivet::physics::make_aabb(transform, collider));
+        const bool in_water =
+            fluid_sample.immersed && fluid_sample.id == static_cast<std::uint8_t>(level::kFluidWater);
+
+        const float target_vx = context.input().state().move_x * kMoveSpeed;
+        apply_horizontal_accel(velocity.x, target_vx, fixed_delta_time);
+
+        if (in_water) {
+            velocity.y += kWaterGravity * fixed_delta_time;
+            velocity.y = std::min(velocity.y, kWaterMaxFallSpeed);
+            apply_drag(velocity.x, kWaterDrag, fixed_delta_time);
+            apply_drag(velocity.y, kWaterDrag, fixed_delta_time);
+
+            if (jump_buffer_time_ > 0.0f) {
+                velocity.y = -kSwimSpeed;
+                jump_buffer_time_ = 0.0f;
+            }
+        } else {
+            velocity.y += kGravity * fixed_delta_time;
+            velocity.y = std::min(velocity.y, kMaxFallSpeed);
+
+            const bool can_jump = player_grounded_ || coyote_time_ > 0.0f;
+            if (can_jump && jump_buffer_time_ > 0.0f) {
+                velocity.y = -kJumpSpeed;
+                jump_buffer_time_ = 0.0f;
+                coyote_time_ = 0.0f;
+            }
+        }
+    }
+
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().step(scene->world(), fixed_delta_time);
+    }
+
+    if (scene->player_entity() != rivet::ecs::kNullEntity) {
+        const auto& registry = scene->world().registry();
+        const auto& transform = registry.get<rivet::ecs::components::Transform>(scene->player_entity());
         player_motion_.prev_x = player_motion_.curr_x;
         player_motion_.prev_y = player_motion_.curr_y;
         player_motion_.curr_x = transform.x;
         player_motion_.curr_y = transform.y;
     }
+}
+
+void LevelGame::draw_level_background(
+    rivet::render::IRenderer& renderer,
+    const LevelScene& scene) const {
+    if (background_texture_ == rivet::resources::kInvalidTexture) {
+        return;
+    }
+
+    renderer.draw_texture(
+        background_texture_,
+        {
+            .x = 0.0f,
+            .y = 0.0f,
+            .width = scene.world_width(),
+            .height = scene.world_height(),
+        });
 }
 
 void LevelGame::draw_level_tiles(
@@ -247,9 +337,9 @@ void LevelGame::draw_level_tiles(
         const tileset::TilesetDef* footprint_def =
             def != nullptr ? def : (tilesets_ ? tilesets_->find(tile.tileset) : nullptr);
         const int footprint_w =
-            footprint_def ? std::max(1, footprint_def->tile_width / data.grid_size) : 1;
+            footprint_def ? tileset::tile_cell_span(footprint_def->tile_width, data.grid_size) : 1;
         const int footprint_h =
-            footprint_def ? std::max(1, footprint_def->tile_height / data.grid_size) : 1;
+            footprint_def ? tileset::tile_cell_span(footprint_def->tile_height, data.grid_size) : 1;
 
         const rivet::render::Rect dest{
             .x = static_cast<float>(tile.x) * cell_size,
@@ -299,6 +389,7 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
             render_x + collider.width * 0.5f,
             render_y + collider.height * 0.5f);
 
+        draw_level_background(renderer, *scene);
         draw_level_tiles(renderer, data, animation_time_);
 
         if (player_texture_ != rivet::resources::kInvalidTexture) {
@@ -313,6 +404,7 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
         return;
     }
 
+    draw_level_background(renderer, *scene);
     draw_level_tiles(renderer, data, animation_time_);
 }
 

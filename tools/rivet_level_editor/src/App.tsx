@@ -3,6 +3,7 @@ import { JsonPreview } from "./components/JsonPreview";
 import {
   Inspector,
   MenuBar,
+  OptionsBar,
   StatusBar,
   TilesetDock,
   ToolRail,
@@ -11,21 +12,32 @@ import { LevelCanvas } from "./components/LevelCanvas";
 import { TilesetPickerModal } from "./components/TilesetPickerModal";
 import { useLevelHistory } from "./hooks/useLevelHistory";
 import { hitObject, snapPoint, tileAt } from "./lib/geometry";
-import { gridLineCells, worldCellSize } from "./lib/level-collision";
+import { strokeBrushCells } from "./lib/brush";
+import { gridLineCells, paintCollisionCells, worldCellSize } from "./lib/level-collision";
+import { FLUID_NONE } from "./types/level";
+import { paintFluidCells } from "./lib/level-fluids";
 import {
   createBlankLevel,
   downloadLevel,
   parseLevelJson,
   resizeLevel,
 } from "./lib/level-io";
+import { applyTilePaintLayers, paintFluidToId } from "./lib/tile-layers";
 import { canPlaceTile, findPlacementAt } from "./lib/tile-placements";
 import { validateLevel } from "./lib/level-validation";
-import { loadAllTilesets, loadTilesetImage } from "./lib/tileset-io";
+import {
+  DEFAULT_PACK_ID,
+  loadPackImage,
+  loadResourcePack,
+  loadTilesetImage,
+} from "./lib/resource-pack";
 import type {
   CollisionTool,
   EditorMode,
+  FluidTool,
   LevelObject,
   ObjectTool,
+  PaintFluidOption,
   PlacedTile,
   TileTool,
 } from "./types/level";
@@ -38,9 +50,18 @@ export function App() {
   const [mode, setMode] = useState<EditorMode>("tiles");
   const [tileTool, setTileTool] = useState<TileTool>("paint");
   const [collisionTool, setCollisionTool] = useState<CollisionTool>("paint");
+  const [fluidTool, setFluidTool] = useState<FluidTool>("water");
   const [objectTool, setObjectTool] = useState<ObjectTool>("select");
-  const [tilesets, setTilesets] = useState<Map<string, TilesetDef>>(() => loadAllTilesets());
+  const [brushSize, setBrushSize] = useState(1);
+  const [paintCollision, setPaintCollision] = useState(false);
+  const [paintFluid, setPaintFluid] = useState<PaintFluidOption>("none");
+  const pack = useMemo(
+    () => loadResourcePack(level.resource_pack || DEFAULT_PACK_ID),
+    [level.resource_pack],
+  );
+  const [tilesets, setTilesets] = useState<Map<string, TilesetDef>>(() => pack.tilesets);
   const [tilesetImages, setTilesetImages] = useState<Map<string, HTMLImageElement>>(new Map());
+  const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
   const [activeTilesetId, setActiveTilesetId] = useState("");
   const [selectedTileId, setSelectedTileId] = useState(0);
   const [selectedObject, setSelectedObject] = useState(-1);
@@ -55,15 +76,14 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const loaded = loadAllTilesets();
-    setTilesets(loaded);
-    const first = loaded.keys().next().value as string | undefined;
+    setTilesets(pack.tilesets);
+    const first = pack.tilesets.keys().next().value as string | undefined;
     if (first) setActiveTilesetId(first);
 
     void (async () => {
       const images = new Map<string, HTMLImageElement>();
       await Promise.all(
-        [...loaded.values()].map(async (tileset) => {
+        [...pack.tilesets.values()].map(async (tileset) => {
           try {
             images.set(tileset.id, await loadTilesetImage(tileset));
           } catch {
@@ -72,11 +92,28 @@ export function App() {
         }),
       );
       setTilesetImages(images);
-      if (images.size === 0 && loaded.size > 0) {
-        setStatus("Tilesets loaded — add matching PNG next to each JSON in src/tilesets/");
+      const loaded = images.size;
+      const total = pack.tilesets.size;
+      const bg = pack.backgrounds.length;
+      const music = pack.music.length;
+      if (total === 0 && bg === 0 && music === 0) {
+        setStatus(`Resource pack "${pack.manifest.id}" is empty — copy assets into src/resourcepacks/`);
+      } else if (loaded < total) {
+        setStatus(
+          `Pack ${pack.manifest.name}: ${loaded}/${total} tilesets, ${bg} backgrounds, ${music} tracks`,
+        );
+      } else {
+        setStatus(
+          `Pack ${pack.manifest.name}: ${total} tilesets, ${bg} backgrounds, ${music} tracks`,
+        );
       }
     })();
-  }, []);
+  }, [pack]);
+
+  useEffect(() => {
+    const asset = pack.backgrounds.find((entry) => entry.id === level.background);
+    void loadPackImage(asset).then(setBackgroundImage);
+  }, [level.background, pack.backgrounds]);
 
   useEffect(() => {
     void fetch("/sample.level.json")
@@ -187,6 +224,7 @@ export function App() {
       }
       if (e.key === "t") setMode("tiles");
       if (e.key === "c") setMode("collision");
+      if (e.key === "f") setMode("fluids");
       if (e.key === "o") setMode("objects");
     };
     window.addEventListener("keydown", onKeyDown);
@@ -224,11 +262,37 @@ export function App() {
     if (mode === "collision") {
       if (tx < 0 || ty < 0 || tx >= level.width || ty >= level.height) return;
       const value = collisionTool === "paint" ? 1 : 0;
+      const cells = strokeBrushCells(
+        strokeFrom,
+        tx,
+        ty,
+        brushSize,
+        level.width,
+        level.height,
+      );
       update((prev) => {
         const collision = prev.collision.map((row) => [...row]);
-        if ((collision[ty]?.[tx] ?? 0) === value) return prev;
-        collision[ty][tx] = value;
+        if (!paintCollisionCells(collision, cells, value, prev.width, prev.height)) return prev;
         return { ...prev, collision };
+      });
+      return;
+    }
+
+    if (mode === "fluids") {
+      if (tx < 0 || ty < 0 || tx >= level.width || ty >= level.height) return;
+      const value = fluidTool === "erase" ? FLUID_NONE : paintFluidToId(fluidTool);
+      const cells = strokeBrushCells(
+        strokeFrom,
+        tx,
+        ty,
+        brushSize,
+        level.width,
+        level.height,
+      );
+      update((prev) => {
+        const fluids = prev.fluids.map((row) => [...row]);
+        if (!paintFluidCells(fluids, cells, value, prev.width, prev.height)) return prev;
+        return { ...prev, fluids };
       });
       return;
     }
@@ -240,6 +304,8 @@ export function App() {
           : [{ x: tx, y: ty }];
         update((prev) => {
           const tiles = [...prev.tiles];
+          const collision = prev.collision.map((row) => [...row]);
+          const fluids = prev.fluids.map((row) => [...row]);
           let changed = false;
           for (const { x, y } of cells) {
             if (x < 0 || y < 0 || x >= prev.width || y >= prev.height) continue;
@@ -253,6 +319,8 @@ export function App() {
                 y,
                 prev.width,
                 prev.height,
+                -1,
+                prev.grid_size,
               )
             ) {
               continue;
@@ -264,9 +332,25 @@ export function App() {
               y,
             });
             changed = true;
+            if (paintCollision || paintFluid !== "none") {
+              changed =
+                applyTilePaintLayers(
+                  collision,
+                  fluids,
+                  x,
+                  y,
+                  tilesets,
+                  activeTilesetId,
+                  paintCollision,
+                  paintFluid,
+                  prev.width,
+                  prev.height,
+                  prev.grid_size,
+                ) || changed;
+            }
           }
           if (!changed) return prev;
-          return { ...prev, tiles };
+          return { ...prev, tiles, collision, fluids };
         });
         return;
       }
@@ -278,7 +362,7 @@ export function App() {
         update((prev) => {
           const toRemove = new Set<number>();
           for (const { x, y } of cells) {
-            const hit = findPlacementAt(prev.tiles, tilesets, x, y);
+            const hit = findPlacementAt(prev.tiles, tilesets, x, y, prev.grid_size);
             if (hit >= 0) toRemove.add(hit);
           }
           if (toRemove.size === 0) return prev;
@@ -292,7 +376,7 @@ export function App() {
       }
 
       if (tileTool === "select" && button === 0) {
-        const hit = findPlacementAt(level.tiles, tilesets, tx, ty);
+        const hit = findPlacementAt(level.tiles, tilesets, tx, ty, level.grid_size);
         setSelectedPlacement(hit);
         return;
       }
@@ -361,6 +445,7 @@ export function App() {
           prev.width,
           prev.height,
           index,
+          prev.grid_size,
         )
       ) {
         return prev;
@@ -431,24 +516,31 @@ export function App() {
           mode={mode}
           tileTool={tileTool}
           collisionTool={collisionTool}
+          fluidTool={fluidTool}
           objectTool={objectTool}
           onModeChange={setMode}
           onTileToolChange={setTileTool}
           onCollisionToolChange={setCollisionTool}
+          onFluidToolChange={setFluidTool}
           onObjectToolChange={setObjectTool}
         />
 
         <div className="editor-center">
+          <OptionsBar mode={mode} brushSize={brushSize} onBrushSizeChange={setBrushSize} />
           <LevelCanvas
             level={level}
             mode={mode}
             tileTool={tileTool}
             collisionTool={collisionTool}
+            fluidTool={fluidTool}
             objectTool={objectTool}
+            brushSize={brushSize}
+            activeTilesetId={activeTilesetId}
             tilesets={tilesets}
             tilesetImages={tilesetImages}
             selectedObject={selectedObject}
             selectedPlacement={selectedPlacement}
+            backgroundImage={backgroundImage}
             mapRevision={mapRevision}
             onPointer={onCanvasPointer}
             onStrokeBegin={beginStroke}
@@ -462,8 +554,12 @@ export function App() {
               tilesetImages={tilesetImages}
               activeTilesetId={activeTilesetId}
               selectedTileId={selectedTileId}
+              paintCollision={paintCollision}
+              paintFluid={paintFluid}
               onTilesetChange={setActiveTilesetId}
               onOpenPicker={() => setTilePickerOpen(true)}
+              onPaintCollisionChange={setPaintCollision}
+              onPaintFluidChange={setPaintFluid}
             />
           )}
         </div>
@@ -475,6 +571,8 @@ export function App() {
           selectedPlacement={selectedPlacement}
           tilesets={tilesets}
           tilesetImages={tilesetImages}
+          backgroundAssets={pack.backgrounds}
+          soundAssets={pack.music}
           snapGrid={snapGrid}
           onLevelPatch={(patch) => update((prev) => ({ ...prev, ...patch }))}
           onResizeMap={resizeMap}

@@ -3,12 +3,17 @@ import { animatedTileFrame } from "../lib/tile-animation";
 import { worldCellSize } from "../lib/level-collision";
 import { hitObject, tileAt } from "../lib/geometry";
 import { tileCellSpan, tileIndexToAtlasCell } from "../lib/tile-math";
-import type {
-  CollisionTool,
-  EditorMode,
-  LevelData,
-  ObjectTool,
-  TileTool,
+import { tileFootprintSpan } from "../lib/tile-footprint";
+import {
+  FLUID_ACID,
+  FLUID_LAVA,
+  FLUID_WATER,
+  type CollisionTool,
+  type EditorMode,
+  type FluidTool,
+  type LevelData,
+  type ObjectTool,
+  type TileTool,
 } from "../types/level";
 import type { TilesetDef } from "../types/tileset";
 
@@ -17,9 +22,13 @@ interface Props {
   mode: EditorMode;
   tileTool: TileTool;
   collisionTool: CollisionTool;
+  fluidTool: FluidTool;
   objectTool: ObjectTool;
+  brushSize: number;
+  activeTilesetId: string;
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
+  backgroundImage: HTMLImageElement | null;
   selectedObject: number;
   selectedPlacement: number;
   mapRevision: number;
@@ -40,28 +49,77 @@ const OBJECT_COLORS: Record<string, string> = {
   block: "#78aa5a",
 };
 
+const FLUID_FILL: Record<number, string> = {
+  [FLUID_WATER]: "rgba(60, 140, 255, 0.48)",
+  [FLUID_ACID]: "rgba(80, 220, 90, 0.45)",
+  [FLUID_LAVA]: "rgba(255, 100, 40, 0.5)",
+};
+
+const FLUID_STROKE: Record<number, string> = {
+  [FLUID_WATER]: "rgba(140, 200, 255, 0.9)",
+  [FLUID_ACID]: "rgba(160, 255, 160, 0.9)",
+  [FLUID_LAVA]: "rgba(255, 180, 100, 0.95)",
+};
+
+type HoverRect = { tx: number; ty: number; w: number; h: number };
+
 type DrawState = {
   camera: { x: number; y: number; zoom: number };
-  hover: { tx: number; ty: number } | null;
+  hover: HoverRect | null;
   level: LevelData;
   mode: EditorMode;
   tileTool: TileTool;
   collisionTool: CollisionTool;
+  fluidTool: FluidTool;
   objectTool: ObjectTool;
+  brushSize: number;
+  activeTilesetId: string;
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
+  backgroundImage: HTMLImageElement | null;
   selectedObject: number;
   selectedPlacement: number;
 };
+
+function hoverFootprint(state: DrawState, tx: number, ty: number): HoverRect {
+  if (state.mode === "tiles" && state.tileTool === "paint" && state.activeTilesetId) {
+    const span = tileFootprintSpan(
+      state.tilesets,
+      state.activeTilesetId,
+      worldCellSize(state.level),
+    );
+    return { tx, ty, w: span.w, h: span.h };
+  }
+  if (state.mode === "collision" || state.mode === "fluids") {
+    const size = Math.min(16, Math.max(1, Math.round(state.brushSize)));
+    return { tx, ty, w: size, h: size };
+  }
+  return { tx, ty, w: 1, h: 1 };
+}
+
+function hoverStrokeColor(mode: EditorMode, fluidTool: FluidTool): string {
+  if (mode === "collision") return "rgba(255,200,100,1)";
+  if (mode === "fluids") {
+    if (fluidTool === "water") return "rgba(120,190,255,1)";
+    if (fluidTool === "acid") return "rgba(140,255,140,1)";
+    if (fluidTool === "lava") return "rgba(255,150,80,1)";
+    return "rgba(200,200,200,0.9)";
+  }
+  return "rgba(110,168,255,0.9)";
+}
 
 export function LevelCanvas({
   level,
   mode,
   tileTool,
   collisionTool,
+  fluidTool,
   objectTool,
+  brushSize,
+  activeTilesetId,
   tilesets,
   tilesetImages,
+  backgroundImage,
   selectedObject,
   selectedPlacement,
   mapRevision,
@@ -85,7 +143,7 @@ export function LevelCanvas({
     | { kind: "placement"; index: number; offsetX: number; offsetY: number }
     | null
   >(null);
-  const hoverRef = useRef<{ tx: number; ty: number } | null>(null);
+  const hoverRef = useRef<HoverRect | null>(null);
   const animationStartRef = useRef(performance.now());
   const cameraRef = useRef(camera);
   const drawStateRef = useRef<DrawState>({
@@ -95,9 +153,13 @@ export function LevelCanvas({
     mode,
     tileTool,
     collisionTool,
+    fluidTool,
     objectTool,
+    brushSize,
+    activeTilesetId,
     tilesets,
     tilesetImages,
+    backgroundImage,
     selectedObject,
     selectedPlacement,
   });
@@ -110,14 +172,17 @@ export function LevelCanvas({
     mode,
     tileTool,
     collisionTool,
+    fluidTool,
     objectTool,
+    brushSize,
+    activeTilesetId,
     tilesets,
     tilesetImages,
+    backgroundImage,
     selectedObject,
     selectedPlacement,
   };
 
-  // Center camera only when loading a new map — not on every edit.
   useEffect(() => {
     const cell = worldCellSize(level);
     setCamera({
@@ -201,12 +266,27 @@ export function LevelCanvas({
 
       const cellScreen = cell * cam.zoom;
       const elapsedMs = performance.now() - animationStartRef.current;
+      const worldW = lvl.width * cell;
+      const worldH = lvl.height * cell;
 
-    for (let y = 0; y < lvl.height; y++) {
+      if (state.backgroundImage && lvl.background) {
+        const topLeft = toScreen(0, 0);
+        ctx.drawImage(
+          state.backgroundImage,
+          topLeft.x,
+          topLeft.y,
+          worldW * cam.zoom,
+          worldH * cam.zoom,
+        );
+      }
+
+      for (let y = 0; y < lvl.height; y++) {
         for (let x = 0; x < lvl.width; x++) {
           const p = toScreen(x * cell, y * cell);
-          ctx.fillStyle = (x + y) % 2 === 0 ? "#151820" : "#12151c";
-          ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
+          if (!state.backgroundImage || !lvl.background) {
+            ctx.fillStyle = (x + y) % 2 === 0 ? "#151820" : "#12151c";
+            ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
+          }
         }
       }
 
@@ -215,7 +295,9 @@ export function LevelCanvas({
         const ts = state.tilesets.get(frame.tileset);
         const image = state.tilesetImages.get(frame.tileset);
         const footprintTs = ts ?? state.tilesets.get(placement.tileset);
-        const span = footprintTs ? tileCellSpan(footprintTs) : { w: 1, h: 1 };
+        const span = footprintTs
+          ? tileCellSpan(footprintTs, worldCellSize(lvl))
+          : { w: 1, h: 1 };
         const p = toScreen(placement.x * cell, placement.y * cell);
         const pw = span.w * cell * cam.zoom;
         const ph = span.h * cell * cam.zoom;
@@ -246,7 +328,22 @@ export function LevelCanvas({
         }
       });
 
-      // Collision overlay — always on top of tiles.
+      const fluidsActive = state.mode === "fluids";
+      for (let y = 0; y < lvl.height; y++) {
+        for (let x = 0; x < lvl.width; x++) {
+          const fluid = lvl.fluids[y]?.[x] ?? 0;
+          if (fluid === 0) continue;
+          const p = toScreen(x * cell, y * cell);
+          ctx.fillStyle = FLUID_FILL[fluid] ?? "rgba(120,120,255,0.4)";
+          ctx.fillRect(p.x, p.y, cellScreen, cellScreen);
+          ctx.strokeStyle = fluidsActive
+            ? (FLUID_STROKE[fluid] ?? "rgba(180,180,255,0.8)")
+            : (FLUID_STROKE[fluid] ?? "rgba(140,140,200,0.45)");
+          ctx.lineWidth = fluidsActive ? 2 : 1;
+          ctx.strokeRect(p.x + 0.5, p.y + 0.5, cellScreen - 1, cellScreen - 1);
+        }
+      }
+
       const collisionFill =
         state.mode === "collision" ? "rgba(255, 50, 50, 0.55)" : "rgba(255, 70, 70, 0.32)";
       const collisionStroke =
@@ -274,10 +371,11 @@ export function LevelCanvas({
 
       if (hover) {
         const hp = toScreen(hover.tx * cell, hover.ty * cell);
-        ctx.strokeStyle =
-          state.mode === "collision" ? "rgba(255,200,100,1)" : "rgba(110,168,255,0.9)";
+        const hw = hover.w * cellScreen;
+        const hh = hover.h * cellScreen;
+        ctx.strokeStyle = hoverStrokeColor(state.mode, state.fluidTool);
         ctx.lineWidth = 2;
-        ctx.strokeRect(hp.x, hp.y, cellScreen, cellScreen);
+        ctx.strokeRect(hp.x, hp.y, hw, hh);
       }
 
       lvl.objects.forEach((object, index) => {
@@ -329,16 +427,18 @@ export function LevelCanvas({
     const world = screenToWorld(clientX, clientY);
     const cell = worldCellSize(level);
     const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
+    const next = hoverFootprint(drawStateRef.current, tx, ty);
     const prev = hoverRef.current;
-    if (!prev || prev.tx !== tx || prev.ty !== ty) {
-      hoverRef.current = { tx, ty };
+    if (!prev || prev.tx !== next.tx || prev.ty !== next.ty || prev.w !== next.w || prev.h !== next.h) {
+      hoverRef.current = next;
       drawStateRef.current.hover = hoverRef.current;
     }
   };
 
   const strokeActive =
     (mode === "tiles" && (tileTool === "paint" || tileTool === "erase")) ||
-    (mode === "collision" && (collisionTool === "paint" || collisionTool === "erase"));
+    (mode === "collision" && (collisionTool === "paint" || collisionTool === "erase")) ||
+    (mode === "fluids" && (fluidTool === "water" || fluidTool === "acid" || fluidTool === "lava" || fluidTool === "erase"));
 
   const paintStroke = (clientX: number, clientY: number, button: number, isStrokeStart: boolean) => {
     const world = screenToWorld(clientX, clientY);
@@ -367,8 +467,6 @@ export function LevelCanvas({
         e.preventDefault();
         (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
         const world = screenToWorld(e.clientX, e.clientY);
-        const cell = worldCellSize(level);
-        const { x: tx, y: ty } = tileAt(world.x, world.y, cell);
 
         if (e.button === 1 || (e.button === 0 && spaceRef.current)) {
           panRef.current = {
@@ -410,8 +508,6 @@ export function LevelCanvas({
         }
 
         onPointer(world.x, world.y, e.button);
-        void tx;
-        void ty;
       }}
       onPointerMove={(e) => {
         updateHover(e.clientX, e.clientY);

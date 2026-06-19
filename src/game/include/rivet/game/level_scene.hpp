@@ -12,6 +12,7 @@ public:
 
     [[nodiscard]] const level::LevelData& data() const { return data_; }
     [[nodiscard]] rivet::ecs::Entity player_entity() const { return spawn_.player; }
+    [[nodiscard]] const std::vector<rivet::ecs::Entity>& patrol_entities() const { return spawn_.patrols; }
     [[nodiscard]] float world_width() const { return spawn_.world_width; }
     [[nodiscard]] float world_height() const { return spawn_.world_height; }
 

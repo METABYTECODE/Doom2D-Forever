@@ -1,4 +1,5 @@
 import type { PlacedTile } from "../types/level";
+import { GRID_SIZE } from "../types/level";
 import type { TilesetDef } from "../types/tileset";
 import { rectsOverlap, tileCellSpan } from "./tile-math";
 
@@ -9,15 +10,16 @@ export interface PlacementOccupancy {
 export function buildOccupancy(
   placements: PlacedTile[],
   tilesets: Map<string, TilesetDef>,
+  gridSize: number = GRID_SIZE,
 ): (PlacementOccupancy | null)[][] {
   const width = placements.reduce((max, tile) => {
     const ts = tilesets.get(tile.tileset);
-    const span = ts ? tileCellSpan(ts) : { w: 1, h: 1 };
+    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
     return Math.max(max, tile.x + span.w);
   }, 0);
   const height = placements.reduce((max, tile) => {
     const ts = tilesets.get(tile.tileset);
-    const span = ts ? tileCellSpan(ts) : { w: 1, h: 1 };
+    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
     return Math.max(max, tile.y + span.h);
   }, 0);
 
@@ -27,7 +29,7 @@ export function buildOccupancy(
 
   placements.forEach((placement, placementIndex) => {
     const ts = tilesets.get(placement.tileset);
-    const span = ts ? tileCellSpan(ts) : { w: 1, h: 1 };
+    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
     for (let dy = 0; dy < span.h; dy++) {
       for (let dx = 0; dx < span.w; dx++) {
         const y = placement.y + dy;
@@ -46,11 +48,12 @@ export function findPlacementAt(
   tilesets: Map<string, TilesetDef>,
   cellX: number,
   cellY: number,
+  gridSize: number = GRID_SIZE,
 ): number {
   for (let i = placements.length - 1; i >= 0; i--) {
     const placement = placements[i];
     const ts = tilesets.get(placement.tileset);
-    const span = ts ? tileCellSpan(ts) : { w: 1, h: 1 };
+    const span = ts ? tileCellSpan(ts, gridSize) : { w: 1, h: 1 };
     if (
       cellX >= placement.x &&
       cellY >= placement.y &&
@@ -73,10 +76,11 @@ export function canPlaceTile(
   mapWidth: number,
   mapHeight: number,
   ignoreIndex = -1,
+  gridSize: number = GRID_SIZE,
 ): boolean {
   const ts = tilesets.get(tilesetId);
   if (!ts) return false;
-  const span = tileCellSpan(ts);
+  const span = tileCellSpan(ts, gridSize);
   if (cellX < 0 || cellY < 0 || cellX + span.w > mapWidth || cellY + span.h > mapHeight) {
     return false;
   }
@@ -85,7 +89,7 @@ export function canPlaceTile(
     if (i === ignoreIndex) continue;
     const other = placements[i];
     const otherTs = tilesets.get(other.tileset);
-    const otherSpan = otherTs ? tileCellSpan(otherTs) : { w: 1, h: 1 };
+    const otherSpan = otherTs ? tileCellSpan(otherTs, gridSize) : { w: 1, h: 1 };
     if (
       rectsOverlap(
         cellX,

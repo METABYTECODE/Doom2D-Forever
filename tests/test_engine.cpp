@@ -8,6 +8,7 @@
 #include <rivet/mod/command.hpp>
 #include <rivet/mod/event.hpp>
 #include <rivet/physics/aabb.hpp>
+#include <rivet/physics/fluid_grid.hpp>
 #include <rivet/physics/physics_world.hpp>
 #include <rivet/render/camera2d.hpp>
 #include <rivet/render/renderer_backend.hpp>
@@ -154,6 +155,25 @@ TEST_CASE("AABB overlap helpers detect intersections", "[engine][physics]") {
 
     CHECK(a.intersects(b));
     CHECK_FALSE(a.intersects(c));
+}
+
+TEST_CASE("FluidGrid samples immersion in water cells", "[engine][physics]") {
+    const std::vector<std::vector<int>> cells = {
+        {0, 0, 0},
+        {0, 1, 0},
+        {0, 1, 1},
+    };
+    const rivet::physics::FluidGrid grid = rivet::physics::FluidGrid::from_grid(cells, 8.0f);
+
+    const rivet::physics::Aabb dry_body{.x = 0.0f, .y = 0.0f, .width = 8.0f, .height = 8.0f};
+    const auto dry = grid.sample_aabb(dry_body);
+    CHECK_FALSE(dry.immersed);
+    CHECK(dry.id == 0);
+
+    const rivet::physics::Aabb wet_body{.x = 8.0f, .y = 8.0f, .width = 8.0f, .height = 8.0f};
+    const auto wet = grid.sample_aabb(wet_body);
+    CHECK(wet.immersed);
+    CHECK(wet.id == 1);
 }
 
 TEST_CASE("PhysicsWorld resolves static collisions", "[engine][physics]") {

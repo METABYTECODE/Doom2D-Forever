@@ -31,6 +31,17 @@ export interface PlacedTile {
 
 export const DEFAULT_FRAME_MS = 120;
 
+export const FLUID_NONE = 0;
+export const FLUID_WATER = 1;
+export const FLUID_ACID = 2;
+export const FLUID_LAVA = 3;
+
+export type FluidId =
+  | typeof FLUID_NONE
+  | typeof FLUID_WATER
+  | typeof FLUID_ACID
+  | typeof FLUID_LAVA;
+
 export interface LevelData {
   format: typeof LEVEL_FORMAT;
   version: typeof LEVEL_VERSION;
@@ -38,15 +49,22 @@ export interface LevelData {
   grid_size: number;
   width: number;
   height: number;
+  resource_pack: string;
   background: string;
   music: string;
   tiles: PlacedTile[];
   collision: number[][];
+  /** 0 = none, 1 = water, 2 = acid, 3 = lava */
+  fluids: number[][];
   objects: LevelObject[];
 }
 
-export type EditorMode = "tiles" | "collision" | "objects";
+export type EditorMode = "tiles" | "collision" | "fluids" | "objects";
 
 export type TileTool = "paint" | "erase" | "select";
 export type CollisionTool = "paint" | "erase";
+export type FluidTool = "water" | "acid" | "lava" | "erase";
 export type ObjectTool = "place-player" | "place-block" | "select";
+
+/** Fluid layer applied when painting tiles (tileset dock). */
+export type PaintFluidOption = "none" | "water" | "acid" | "lava";

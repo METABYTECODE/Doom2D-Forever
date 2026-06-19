@@ -1,0 +1,7 @@
+{
+  "name": "minidoom",
+  "texture": "minidoom_ts_1.png",
+  "tile_width": 36,
+  "tile_height": 36,
+  "columns": 13
+}

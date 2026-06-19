@@ -4,6 +4,7 @@
 #include <nlohmann/json.hpp>
 
 #include <rivet/game/level/level_loader.hpp>
+#include <rivet/game/resources/resource_pack.hpp>
 
 namespace rivet::game::level {
 
@@ -61,6 +62,21 @@ namespace {
         std::vector<int>(static_cast<std::size_t>(width), 0));
 }
 
+[[nodiscard]] std::vector<std::vector<int>> empty_fluids_grid(const int width, const int height) {
+    return empty_collision_grid(width, height);
+}
+
+[[nodiscard]] bool fluids_grid_has_content(const std::vector<std::vector<int>>& fluids) {
+    for (const auto& row : fluids) {
+        for (const int cell : row) {
+            if (cell != kFluidNone) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 [[nodiscard]] LevelData load_level_v1(const nlohmann::json& json, const std::filesystem::path& path) {
     LevelData level;
     level.name = json.value("name", path.stem().string());
@@ -80,6 +96,7 @@ namespace {
     level.width = legacy_width * scale;
     level.height = legacy_height * scale;
     level.collision = empty_collision_grid(level.width, level.height);
+    level.fluids = empty_fluids_grid(level.width, level.height);
 
     for (int y = 0; y < legacy_height; ++y) {
         for (int x = 0; x < legacy_width; ++x) {
@@ -110,6 +127,7 @@ namespace {
     level.grid_size = json.value("grid_size", 8);
     level.width = json.value("width", 0);
     level.height = json.value("height", 0);
+    level.resource_pack = json.value("resource_pack", resources::kDefaultPackId);
     level.background = json.value("background", "");
     level.music = json.value("music", "");
 
@@ -125,6 +143,12 @@ namespace {
         level.collision = empty_collision_grid(level.width, level.height);
     }
 
+    if (json.contains("fluids")) {
+        level.fluids = json.at("fluids").get<std::vector<std::vector<int>>>();
+    } else {
+        level.fluids = empty_fluids_grid(level.width, level.height);
+    }
+
     if (level.height == 0) {
         level.height = static_cast<int>(level.collision.size());
     }
@@ -135,6 +159,15 @@ namespace {
     for (const auto& row : level.collision) {
         if (static_cast<int>(row.size()) != level.width) {
             throw std::runtime_error("Collision rows have inconsistent width: " + path.string());
+        }
+    }
+
+    if (static_cast<int>(level.fluids.size()) != level.height) {
+        level.fluids = empty_fluids_grid(level.width, level.height);
+    }
+    for (const auto& row : level.fluids) {
+        if (static_cast<int>(row.size()) != level.width) {
+            throw std::runtime_error("Fluids rows have inconsistent width: " + path.string());
         }
     }
 

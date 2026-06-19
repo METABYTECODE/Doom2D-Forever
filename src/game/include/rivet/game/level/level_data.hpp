@@ -60,11 +60,18 @@ struct LevelData {
     int grid_size = 8;
     int width = 0;
     int height = 0;
+    std::string resource_pack = "dev";
     std::string background;
     std::string music;
     std::vector<PlacedTile> tiles;
     std::vector<std::vector<int>> collision;
+    std::vector<std::vector<int>> fluids;
     std::vector<LevelObject> objects;
 };
+
+inline constexpr int kFluidNone = 0;
+inline constexpr int kFluidWater = 1;
+inline constexpr int kFluidAcid = 2;
+inline constexpr int kFluidLava = 3;
 
 } // namespace rivet::game::level

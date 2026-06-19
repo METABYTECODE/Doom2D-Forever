@@ -5,6 +5,7 @@
 
 #include <rivet/game/sandbox_game.hpp>
 #include <rivet/game/sandbox_scene.hpp>
+#include <rivet/physics/physics_world.hpp>
 
 namespace rivet::game {
 
@@ -48,13 +49,15 @@ void ensure_demo_texture(const std::filesystem::path& path) {
 void SandboxGame::on_attach(rivet::core::GameContext& context) {
     context.scenes().push(std::make_unique<SandboxScene>());
 
-    physics_.set_world_bounds({
-        .min_x = 0.0f,
-        .min_y = 0.0f,
-        .max_x = kWorldWidth - kSpriteSize,
-        .max_y = kWorldHeight - kSpriteSize,
-        .enabled = true,
-    });
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().set_world_bounds({
+            .min_x = 0.0f,
+            .min_y = 0.0f,
+            .max_x = kWorldWidth - kSpriteSize,
+            .max_y = kWorldHeight - kSpriteSize,
+            .enabled = true,
+        });
+    }
 
     if (context.has_service<rivet::resources::ResourceManager>()) {
         auto& resources = context.service<rivet::resources::ResourceManager>();
@@ -76,9 +79,10 @@ void SandboxGame::on_attach(rivet::core::GameContext& context) {
 }
 
 void SandboxGame::on_detach(rivet::core::GameContext& context) {
-    (void)context;
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().clear();
+    }
     player_texture_ = rivet::resources::kInvalidTexture;
-    physics_.clear();
 }
 
 void SandboxGame::on_update(rivet::core::GameContext& context, float delta_time) {
@@ -110,7 +114,10 @@ void SandboxGame::on_fixed_update(rivet::core::GameContext& context, float fixed
     if (scene == nullptr) {
         return;
     }
-    physics_.step(scene->world(), fixed_delta_time);
+
+    if (context.has_service<rivet::physics::PhysicsWorld>()) {
+        context.service<rivet::physics::PhysicsWorld>().step(scene->world(), fixed_delta_time);
+    }
 }
 
 void SandboxGame::on_render(rivet::core::GameContext& context, float interpolation_alpha) {

@@ -22,7 +22,7 @@ struct TilesetDef {
     rivet::resources::TextureHandle texture = rivet::resources::kInvalidTexture;
 };
 
-/// Loads `assets/tilesets/{id}.json` + companion texture via ResourceManager.
+/// Loads tileset JSON + textures from `content/textures/tilesets/` (recursive).
 class TilesetCatalog {
 public:
     TilesetCatalog(
@@ -35,6 +35,9 @@ private:
     rivet::resources::ResourceManager& resources_;
     std::unordered_map<std::string, TilesetDef> tilesets_;
 };
+
+/// Grid cells occupied by a tile graphic (matches editor `tileCellSpan`).
+[[nodiscard]] int tile_cell_span(int tile_pixels, int grid_size);
 
 [[nodiscard]] rivet::render::Rect tile_source_rect(const TilesetDef& tileset, int tile_id);
 

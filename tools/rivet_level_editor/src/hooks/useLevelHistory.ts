@@ -1,5 +1,5 @@
 import { useCallback, useReducer } from "react";
-import { ensureLevelCollision } from "../lib/level-collision";
+import { ensureLevelGrids } from "../lib/level-grids";
 import type { LevelData } from "../types/level";
 
 const MAX_HISTORY = 60;
@@ -25,14 +25,14 @@ function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "replace":
       return {
-        level: ensureLevelCollision(action.level),
+        level: ensureLevelGrids(action.level),
         past: [],
         future: [],
         dirty: !action.clean,
         strokeBase: null,
       };
     case "update": {
-      const next = ensureLevelCollision(action.updater(state.level));
+      const next = ensureLevelGrids(action.updater(state.level));
       if (next === state.level) return state;
       if (state.strokeBase) {
         return { ...state, level: next };

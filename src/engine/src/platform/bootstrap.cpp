@@ -1,9 +1,9 @@
 #include <rivet/platform/bootstrap.hpp>
 
 #include <memory>
-#include <string_view>
 
 #include <rivet/platform/sdl_platform.hpp>
+#include <rivet/physics/physics_world.hpp>
 #include <rivet/render/irenderer.hpp>
 #include <rivet/render/renderer_factory.hpp>
 #include <rivet/resources/resource_manager.hpp>
@@ -32,6 +32,7 @@ void install_backends(core::Application& app, const BootstrapConfig& config) {
     app.services().register_service<Platform>(platform);
     app.services().register_service<render::IRenderer>(renderer);
     app.services().register_service<resources::ResourceManager>(resources);
+    app.services().register_service<physics::PhysicsWorld>(std::make_shared<physics::PhysicsWorld>());
 }
 
 BootstrapConfig parse_bootstrap_config(const int argc, char** argv) {

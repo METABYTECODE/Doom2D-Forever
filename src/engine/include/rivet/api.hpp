@@ -9,12 +9,16 @@
 #include <rivet/core/log.hpp>
 #include <rivet/core/service_registry.hpp>
 #include <rivet/ecs/components/collider.hpp>
+#include <rivet/ecs/components/physics_contacts.hpp>
 #include <rivet/ecs/components/transform.hpp>
 #include <rivet/ecs/world.hpp>
 #include <rivet/input/input_system.hpp>
 #include <rivet/input/keys.hpp>
 #include <rivet/physics/aabb.hpp>
+#include <rivet/physics/fluid_grid.hpp>
 #include <rivet/physics/physics_world.hpp>
+#include <rivet/physics/spatial_grid.hpp>
+#include <rivet/physics/tile_collider.hpp>
 #include <rivet/platform/bootstrap.hpp>
 #include <rivet/platform/window_config.hpp>
 #include <rivet/render/camera2d.hpp>

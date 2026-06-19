@@ -1,10 +1,11 @@
 #pragma once
 
 #include <rivet/ecs/world.hpp>
+#include <rivet/physics/tile_collider.hpp>
 
 namespace rivet::physics {
 
-/// Simple AABB physics for engine demos. Game-specific solvers stay in the game layer.
+/// AABB physics: axis-separated move, tile + entity collision, broadphase.
 class PhysicsWorld {
 public:
     struct Bounds {
@@ -16,11 +17,19 @@ public:
     };
 
     void set_world_bounds(const Bounds& bounds);
-    void step(ecs::World& world, float fixed_delta_time);
+    void set_tile_collider(TileCollider collider);
+    void set_broadphase_cell_size(float cell_size);
+
+    [[nodiscard]] const Bounds& bounds() const { return bounds_; }
+    [[nodiscard]] const TileCollider& tile_collider() const { return tiles_; }
+
+    void step(rivet::ecs::World& world, float fixed_delta_time);
     void clear();
 
 private:
     Bounds bounds_{};
+    TileCollider tiles_{};
+    float broadphase_cell_size_ = 64.0f;
 };
 
 } // namespace rivet::physics
