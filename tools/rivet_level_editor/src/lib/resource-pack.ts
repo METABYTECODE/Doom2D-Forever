@@ -25,6 +25,8 @@ export interface ResourcePackCatalog {
   backgrounds: PackAsset[];
   music: PackAsset[];
   tilesets: Map<string, TilesetDef>;
+  /** Raw PNG/WebP atlases under textures/sprites/ (no sidecar JSON). */
+  spriteAtlases: PackAsset[];
 }
 
 const manifestFiles = import.meta.glob("../resourcepacks/*/pack.json", {
@@ -50,18 +52,36 @@ const tilesetTextureFiles = import.meta.glob(
   { eager: true, import: "default" },
 ) as Record<string, string>;
 
+const spriteAtlasFiles = import.meta.glob(
+  "../resourcepacks/*/textures/sprites/**/*.{png,jpg,jpeg,webp}",
+  { eager: true, import: "default" },
+) as Record<string, string>;
+
+function normalizePackPath(path: string): string {
+  const parts = path.replace(/\\/g, "/").replace(/^(\.\.\/)+/, "").split("/");
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (part === "..") {
+      stack.pop();
+    } else if (part && part !== ".") {
+      stack.push(part);
+    }
+  }
+  return stack.join("/");
+}
+
 function packIdFromPath(path: string): string | null {
-  const normalized = path.replace(/\\/g, "/");
+  const normalized = normalizePackPath(path);
   const match = normalized.match(/resourcepacks\/([^/]+)\//);
   return match?.[1] ?? null;
 }
 
 function catalogPrefix(packId: string, catalogPath: string): string {
-  return `/resourcepacks/${packId}/${catalogPath}/`;
+  return `resourcepacks/${packId}/${catalogPath}/`;
 }
 
 function assetIdFromPath(path: string, packId: string, catalogPath: string): string {
-  const normalized = path.replace(/\\/g, "/");
+  const normalized = normalizePackPath(path);
   const prefix = catalogPrefix(packId, catalogPath);
   const idx = normalized.indexOf(prefix);
   const relative =
@@ -100,36 +120,59 @@ function buildPackAssets(
 }
 
 function fileBaseName(path: string): string {
-  const name = path.split("/").pop() ?? path;
+  const name = normalizePackPath(path).split("/").pop() ?? path;
   return name.replace(/\.[^.]+$/, "");
 }
 
 function jsonDirectory(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
+  const normalized = normalizePackPath(path);
   return normalized.slice(0, normalized.lastIndexOf("/"));
 }
 
-function resolveTilesetTexture(textureName: string, jsonPath: string): string {
+function resolveCatalogTexture(
+  textureName: string,
+  jsonPath: string,
+  textureFiles: Record<string, string>,
+): string {
   const jsonDir = jsonDirectory(jsonPath);
-  for (const [path, url] of Object.entries(tilesetTextureFiles)) {
-    const normalized = path.replace(/\\/g, "/");
+
+  if (textureName.includes("/")) {
+    const combined = normalizePackPath(`${jsonDir}/${textureName}`);
+    for (const [path, url] of Object.entries(textureFiles)) {
+      if (normalizePackPath(path) === combined) {
+        return url;
+      }
+    }
+  }
+
+  for (const [path, url] of Object.entries(textureFiles)) {
+    const normalized = normalizePackPath(path);
     if (normalized.endsWith(`/${textureName}`) && normalized.startsWith(jsonDir)) {
       return url;
     }
   }
-  for (const [path, url] of Object.entries(tilesetTextureFiles)) {
-    if (path.endsWith(`/${textureName}`)) {
+  for (const [path, url] of Object.entries(textureFiles)) {
+    if (normalizePackPath(path).endsWith(`/${textureName}`)) {
       return url;
     }
   }
   return "";
 }
 
-function parseTileset(path: string, raw: Record<string, unknown>): TilesetDef | null {
-  const idFromFile = fileBaseName(path);
+function resolveTilesetTexture(textureName: string, jsonPath: string): string {
+  return resolveCatalogTexture(textureName, jsonPath, tilesetTextureFiles);
+}
+
+function parseAtlasDef(
+  path: string,
+  raw: Record<string, unknown>,
+  resolveTexture: (textureName: string, jsonPath: string) => string,
+  idFromPath: (path: string) => string,
+): TilesetDef | null {
+  const idFromFile = idFromPath(path);
   const id = String(raw.id ?? idFromFile);
-  const textureName = String(raw.texture ?? `${idFromFile}.png`);
-  const textureUrl = resolveTilesetTexture(textureName, path);
+  const textureName = String(raw.texture ?? `${fileBaseName(path)}.png`);
+  const textureUrl = resolveTexture(textureName, path);
   if (!textureUrl) {
     console.warn(`[resourcepack] ${id}: texture not found (${textureName})`);
   }
@@ -158,7 +201,7 @@ function loadTilesets(packId: string): Map<string, TilesetDef> {
   const map = new Map<string, TilesetDef>();
   for (const [path, mod] of Object.entries(tilesetJsonFiles)) {
     if (packIdFromPath(path) !== packId) continue;
-    const tileset = parseTileset(path, mod.default);
+    const tileset = parseAtlasDef(path, mod.default, resolveTilesetTexture, fileBaseName);
     if (!tileset) continue;
     if (map.has(tileset.id)) {
       console.warn(`[resourcepack] duplicate tileset id "${tileset.id}" at ${path}`);
@@ -198,6 +241,7 @@ export function loadResourcePack(packId: string = DEFAULT_PACK_ID): ResourcePack
     backgrounds: buildPackAssets(backgroundFiles, packId, "textures/backgrounds"),
     music: buildPackAssets(musicFiles, packId, "audio/music"),
     tilesets: loadTilesets(packId),
+    spriteAtlases: buildPackAssets(spriteAtlasFiles, packId, "textures/sprites"),
   };
 }
 

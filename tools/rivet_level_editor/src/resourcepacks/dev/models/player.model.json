@@ -1,0 +1,27 @@
+{
+  "format": "rivet-model",
+  "version": 2,
+  "id": "player",
+  "name": "Player",
+  "resource_pack": "dev",
+  "animations": {
+    "IDLE": {
+      "atlas": "player/barrel",
+      "frame_width": 32,
+      "frame_height": 64,
+      "columns": 3,
+      "frames": [{ "id": 0 }],
+      "frame_ms": 0,
+      "loop": true
+    },
+    "WALK": {
+      "atlas": "player/barrel",
+      "frame_width": 32,
+      "frame_height": 64,
+      "columns": 3,
+      "frames": [{ "id": 0 }, { "id": 1 }, { "id": 2 }],
+      "frame_ms": 80,
+      "loop": true
+    }
+  }
+}
