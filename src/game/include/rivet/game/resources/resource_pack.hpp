@@ -31,6 +31,8 @@ public:
     [[nodiscard]] std::optional<std::filesystem::path> resolve_background(const std::string& asset_id) const;
     [[nodiscard]] std::optional<std::filesystem::path> resolve_music(const std::string& asset_id) const;
     [[nodiscard]] std::optional<std::filesystem::path> resolve_sfx(const std::string& asset_id) const;
+    [[nodiscard]] std::optional<std::filesystem::path> resolve_model(const std::string& model_id) const;
+    [[nodiscard]] std::optional<std::filesystem::path> resolve_sprite_atlas(const std::string& asset_id) const;
 
 private:
     ResourcePack(Manifest manifest, std::filesystem::path root);

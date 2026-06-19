@@ -205,4 +205,33 @@ std::optional<std::filesystem::path> ResourcePack::resolve_sfx(const std::string
         sizeof(kExtensions) / sizeof(kExtensions[0]));
 }
 
+std::optional<std::filesystem::path> ResourcePack::resolve_model(const std::string& model_id) const {
+    const std::string id = normalize_asset_id(model_id);
+    if (id.empty()) {
+        return std::nullopt;
+    }
+
+    const auto direct = root_ / "models" / (id + ".model.json");
+    if (std::filesystem::exists(direct)) {
+        return direct;
+    }
+
+    const auto stem = std::filesystem::path(id).stem().string();
+    const auto by_stem = root_ / "models" / (stem + ".model.json");
+    if (std::filesystem::exists(by_stem)) {
+        return by_stem;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<std::filesystem::path> ResourcePack::resolve_sprite_atlas(const std::string& asset_id) const {
+    static constexpr const char* kExtensions[] = {".png", ".jpg", ".jpeg", ".webp", ".gif"};
+    return resolve_catalog_asset(
+        std::filesystem::path("textures") / "sprites",
+        asset_id,
+        kExtensions,
+        sizeof(kExtensions) / sizeof(kExtensions[0]));
+}
+
 } // namespace rivet::game::resources

@@ -7,6 +7,8 @@
 #include <rivet/api.hpp>
 #include <rivet/game/level_scene.hpp>
 #include <rivet/game/level/level_data.hpp>
+#include <rivet/game/model/model_animator.hpp>
+#include <rivet/game/model/model_types.hpp>
 #include <rivet/game/tileset/tileset_catalog.hpp>
 #include <rivet/game/resources/resource_pack.hpp>
 #include <rivet/physics/fluid_grid.hpp>
@@ -32,11 +34,17 @@ private:
     void draw_level_background(rivet::render::IRenderer& renderer, const LevelScene& scene) const;
     void draw_level_tiles(rivet::render::IRenderer& renderer, const level::LevelData& data, float animation_time);
     void update_patrols(rivet::ecs::World& world, const std::vector<rivet::ecs::Entity>& patrols);
+    void update_player_animation(float delta_time, float velocity_x, float velocity_y);
+    void draw_player_sprite(
+        rivet::render::IRenderer& renderer,
+        float render_x,
+        float render_y,
+        float collider_width,
+        float collider_height) const;
 
     std::filesystem::path level_path_;
     level::LevelData level_;
     rivet::physics::FluidGrid fluids_;
-    rivet::resources::TextureHandle player_texture_ = rivet::resources::kInvalidTexture;
     rivet::resources::TextureHandle background_texture_ = rivet::resources::kInvalidTexture;
     std::unique_ptr<tileset::TilesetCatalog> tilesets_;
     std::optional<resources::ResourcePack> resource_pack_;
@@ -44,6 +52,11 @@ private:
     std::filesystem::path music_path_;
     std::filesystem::path jump_sfx_path_;
     float animation_time_ = 0.0f;
+
+    std::optional<model::ModelDef> player_model_;
+    model::ModelAnimator player_animator_;
+    float player_velocity_x_ = 0.0f;
+    float player_velocity_y_ = 0.0f;
 
     struct PlayerMotion {
         float prev_x = 0.0f;

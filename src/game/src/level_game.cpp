@@ -11,6 +11,7 @@
 #include <spdlog/spdlog.h>
 #include <rivet/game/level/level_loader.hpp>
 #include <rivet/audio/audio_system.hpp>
+#include <rivet/game/model/model_loader.hpp>
 #include <rivet/input/keys.hpp>
 #include <rivet/physics/aabb.hpp>
 #include <rivet/physics/fluid_grid.hpp>
@@ -141,8 +142,22 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
             if (const auto jump_sfx = resource_pack_->resolve_sfx("jump")) {
                 jump_sfx_path_ = *jump_sfx;
             }
+
+            if (const auto model_path = resource_pack_->resolve_model("player")) {
+                if (const auto loaded = model::load_model(*model_path, resources, *resource_pack_)) {
+                    player_model_ = std::move(*loaded);
+                    player_animator_.set_model(&*player_model_);
+                    spdlog::info(
+                        "Loaded player model: {} ({} animations)",
+                        player_model_->id,
+                        player_model_->animations.size());
+                } else {
+                    spdlog::warn("Failed to load player model from {}", model_path->string());
+                }
+            } else {
+                spdlog::warn("Player model not found in resource pack");
+            }
         }
-        player_texture_ = resources.create_checkerboard(64, 8, "player");
     }
 
     if (!music_path_.empty() && context.has_service<rivet::audio::AudioSystem>()) {
@@ -173,12 +188,15 @@ void LevelGame::on_detach(rivet::core::GameContext& context) {
         context.service<rivet::physics::PhysicsWorld>().clear();
     }
     tilesets_.reset();
-    player_texture_ = rivet::resources::kInvalidTexture;
     background_texture_ = rivet::resources::kInvalidTexture;
     resource_pack_.reset();
     music_path_.clear();
     jump_sfx_path_.clear();
     fluids_ = {};
+    player_model_.reset();
+    player_animator_.set_model(nullptr);
+    player_velocity_x_ = 0.0f;
+    player_velocity_y_ = 0.0f;
     player_grounded_ = false;
     jump_buffer_time_ = 0.0f;
     coyote_time_ = 0.0f;
@@ -240,6 +258,14 @@ void LevelGame::on_update(rivet::core::GameContext& context, float delta_time) {
         jump_buffer_time_ = kJumpBufferTime;
     }
     jump_buffer_time_ = std::max(0.0f, jump_buffer_time_ - delta_time);
+
+    if (auto* scene = active_level(context)) {
+        if (scene->player_entity() != rivet::ecs::kNullEntity) {
+            const auto& velocity =
+                scene->world().registry().get<rivet::ecs::components::Velocity>(scene->player_entity());
+            update_player_animation(delta_time, velocity.x, velocity.y);
+        }
+    }
 }
 
 void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_delta_time) {
@@ -266,6 +292,8 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
         }
 
         auto& velocity = registry.get<rivet::ecs::components::Velocity>(scene->player_entity());
+        player_velocity_x_ = velocity.x;
+        player_velocity_y_ = velocity.y;
         const auto& transform = registry.get<rivet::ecs::components::Transform>(scene->player_entity());
         const auto& collider = registry.get<rivet::ecs::components::Collider>(scene->player_entity());
 
@@ -364,6 +392,43 @@ void LevelGame::draw_level_tiles(
     }
 }
 
+void LevelGame::update_player_animation(const float delta_time, const float velocity_x, const float velocity_y) {
+    if (!player_model_.has_value()) {
+        return;
+    }
+
+    const std::string desired =
+        model::select_player_locomotion_animation(player_grounded_, velocity_x, velocity_y);
+    player_animator_.set_animation(desired, false);
+    player_animator_.update(delta_time);
+}
+
+void LevelGame::draw_player_sprite(
+    rivet::render::IRenderer& renderer,
+    const float render_x,
+    const float render_y,
+    const float collider_width,
+    const float collider_height) const {
+    if (player_model_.has_value() && player_animator_.has_clip()) {
+        const auto frame = player_animator_.current_frame();
+        if (frame.texture != rivet::resources::kInvalidTexture) {
+            const auto dest = model::model_sprite_dest_rect(
+                render_x,
+                render_y,
+                collider_width,
+                collider_height,
+                frame.frame_width,
+                frame.frame_height);
+            renderer.draw_texture(frame.texture, dest, frame.source);
+            return;
+        }
+    }
+
+    renderer.draw_filled_rect(
+        {.x = render_x, .y = render_y, .width = collider_width, .height = collider_height},
+        {.r = 220, .g = 90, .b = 70, .a = 255});
+}
+
 void LevelGame::on_render(rivet::core::GameContext& context, float interpolation_alpha) {
     if (!context.has_service<rivet::render::IRenderer>()) {
         return;
@@ -396,15 +461,7 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
         draw_level_background(renderer, *scene);
         draw_level_tiles(renderer, data, animation_time_);
 
-        if (player_texture_ != rivet::resources::kInvalidTexture) {
-            renderer.draw_texture(
-                player_texture_,
-                {.x = render_x, .y = render_y, .width = collider.width, .height = collider.height});
-        } else {
-            renderer.draw_filled_rect(
-                {.x = render_x, .y = render_y, .width = collider.width, .height = collider.height},
-                {.r = 220, .g = 90, .b = 70, .a = 255});
-        }
+        draw_player_sprite(renderer, render_x, render_y, collider.width, collider.height);
         return;
     }
 

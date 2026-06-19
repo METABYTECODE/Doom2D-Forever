@@ -9,6 +9,8 @@
 #include <rivet/game/level/level_spawner.hpp>
 #include <rivet/game/tileset/tileset_catalog.hpp>
 #include <rivet/game/resources/resource_pack.hpp>
+#include <rivet/game/model/model_animator.hpp>
+#include <rivet/game/model/model_types.hpp>
 
 #ifndef D2DF_SOURCE_DIR
 #define D2DF_SOURCE_DIR "."
@@ -157,4 +159,57 @@ TEST_CASE("Tileset anchor maps world pixel to destination rect", "[game][level]"
     CHECK(dest.y == 96.0f);
     CHECK(dest.width == 16.0f);
     CHECK(dest.height == 16.0f);
+}
+
+TEST_CASE("Player locomotion selects built-in animation ids", "[game][model]") {
+    using rivet::game::model::select_player_locomotion_animation;
+
+    CHECK(select_player_locomotion_animation(true, 0.0f, 0.0f) == "IDLE");
+    CHECK(select_player_locomotion_animation(true, 120.0f, 0.0f) == "WALK");
+    CHECK(select_player_locomotion_animation(false, 0.0f, -200.0f) == "JUMP");
+    CHECK(select_player_locomotion_animation(false, 0.0f, 200.0f) == "FALL");
+}
+
+TEST_CASE("ModelAnimator advances looping clip frames", "[game][model]") {
+    rivet::game::model::ModelDef model;
+    model.id = "test";
+
+    rivet::game::model::ModelAnimation clip;
+    clip.frame_width = 32;
+    clip.frame_height = 32;
+    clip.columns = 2;
+    clip.frame_ids = {0, 1};
+    clip.frame_ms = 100;
+    clip.loop = true;
+    model.animations.emplace("IDLE", clip);
+
+    rivet::game::model::ModelAnimator animator;
+    animator.set_model(&model);
+    animator.set_animation("IDLE", true);
+    animator.update(0.15f);
+
+    CHECK(animator.current_frame().source.x == 32.0f);
+    CHECK(animator.current_frame().source.y == 0.0f);
+}
+
+TEST_CASE("Model sprite dest rect aligns feet to collider bottom", "[game][model]") {
+    const auto dest = rivet::game::model::model_sprite_dest_rect(10.0f, 20.0f, 40.0f, 40.0f, 64, 64);
+    CHECK(dest.x == -2.0f);
+    CHECK(dest.y == -4.0f);
+    CHECK(dest.width == 64.0f);
+    CHECK(dest.height == 64.0f);
+}
+
+TEST_CASE("ResourcePack resolves player model path", "[game][model]") {
+    const auto assets = source_path("assets");
+    if (!std::filesystem::exists(assets / "resourcepacks" / "dev" / "pack.json")) {
+        SKIP("dev resource pack not available");
+    }
+
+    const auto pack = rivet::game::resources::ResourcePack::load(assets, "dev");
+    REQUIRE(pack.has_value());
+
+    const auto model_path = pack->resolve_model("player");
+    REQUIRE(model_path.has_value());
+    CHECK(std::filesystem::exists(*model_path));
 }

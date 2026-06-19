@@ -8,6 +8,9 @@ add_library(rivet_game STATIC
     src/level/level_spawner.cpp
     src/level_game.cpp
     src/level_scene.cpp
+    src/model/model_animator.cpp
+    src/model/model_loader.cpp
+    src/model/model_types.cpp
     src/sandbox_game.cpp
     src/sandbox_scene.cpp
     src/tileset/tileset_catalog.cpp
