@@ -37,7 +37,8 @@ public:
     virtual void draw_texture(
         resources::TextureHandle handle,
         const Rect& dest,
-        const Rect& source = {}) = 0;
+        const Rect& source = {},
+        bool flip_horizontal = false) = 0;
     [[nodiscard]] virtual std::optional<resources::TextureInfo> texture_info(
         resources::TextureHandle handle) const = 0;
     virtual void render(float interpolation_alpha) { (void)interpolation_alpha; }

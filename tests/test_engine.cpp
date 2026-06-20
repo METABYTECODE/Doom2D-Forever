@@ -10,7 +10,7 @@
 #include <rivet/mod/api.hpp>
 #include <rivet/mod/command.hpp>
 #include <rivet/mod/event.hpp>
-#include <rivet/physics/aabb.hpp>
+#include <rivet/physics/character_controller.hpp>
 #include <rivet/physics/fluid_grid.hpp>
 #include <rivet/physics/physics_world.hpp>
 #include <rivet/render/camera2d.hpp>
@@ -185,6 +185,43 @@ TEST_CASE("FluidGrid samples immersion in water cells", "[engine][physics]") {
     const auto wet = grid.sample_aabb(wet_body);
     CHECK(wet.immersed);
     CHECK(wet.id == 1);
+    CHECK(wet.immersion > 0.9f);
+
+    const rivet::physics::Aabb surface_body{.x = 8.0f, .y = 0.0f, .width = 8.0f, .height = 16.0f};
+    const auto surface = grid.sample_aabb(surface_body);
+    CHECK(surface.immersed);
+    CHECK(surface.id == 1);
+    CHECK(surface.immersion > 0.4f);
+    CHECK(surface.immersion < 0.7f);
+}
+
+TEST_CASE("CharacterController swims up when jump held in water", "[engine][physics]") {
+    rivet::physics::CharacterController controller;
+    float vx = 0.0f;
+    float vy = 0.0f;
+
+    const rivet::physics::CharacterController::Input input{.move_x = 0.0f, .jump_held = true};
+    const rivet::physics::CharacterController::Environment env{.in_water = true, .grounded = false};
+
+    for (int i = 0; i < 30; ++i) {
+        controller.simulate(vx, vy, input, env, 1.0f / 60.0f);
+    }
+
+    CHECK(vy < -50.0f);
+}
+
+TEST_CASE("CharacterController caps upward swim speed in water", "[engine][physics]") {
+    rivet::physics::CharacterController controller;
+    float vx = 0.0f;
+    float vy = -400.0f;
+
+    const rivet::physics::CharacterController::Input input{.move_x = 0.0f, .jump_held = true};
+    const rivet::physics::CharacterController::Environment env{.in_water = true, .grounded = false};
+
+    controller.simulate(vx, vy, input, env, 1.0f / 60.0f);
+
+    CHECK(vy >= -controller.config().max_water_vy);
+    CHECK(vy < -200.0f);
 }
 
 TEST_CASE("PhysicsWorld resolves static collisions", "[engine][physics]") {

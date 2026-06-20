@@ -8,6 +8,7 @@ add_library(rivet_engine STATIC
     src/ecs/world.cpp
     src/input/input_system.cpp
     src/physics/aabb.cpp
+    src/physics/character_controller.cpp
     src/physics/fluid_grid.cpp
     src/physics/physics_world.cpp
     src/physics/spatial_grid.cpp

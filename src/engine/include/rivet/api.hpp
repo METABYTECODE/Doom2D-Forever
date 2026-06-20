@@ -15,6 +15,7 @@
 #include <rivet/input/input_system.hpp>
 #include <rivet/input/keys.hpp>
 #include <rivet/physics/aabb.hpp>
+#include <rivet/physics/character_controller.hpp>
 #include <rivet/physics/fluid_grid.hpp>
 #include <rivet/physics/physics_world.hpp>
 #include <rivet/physics/spatial_grid.hpp>

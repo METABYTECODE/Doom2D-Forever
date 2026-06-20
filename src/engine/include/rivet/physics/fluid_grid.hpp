@@ -26,9 +26,11 @@ public:
     struct Sample {
         std::uint8_t id = 0;
         bool immersed = false;
+        /// Fraction of the sampled AABB volume covered by fluid (0..1).
+        float immersion = 0.0f;
     };
 
-    /// Dominant fluid id under the lower 2/3 of the box (platformer body probe).
+    /// Fluid id and immersion fraction for the entity AABB.
     [[nodiscard]] Sample sample_aabb(const Aabb& box) const;
 
 private:

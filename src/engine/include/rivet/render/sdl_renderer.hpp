@@ -46,7 +46,8 @@ public:
     void draw_texture(
         resources::TextureHandle handle,
         const Rect& dest,
-        const Rect& source = {}) override;
+        const Rect& source = {},
+        bool flip_horizontal = false) override;
     [[nodiscard]] std::optional<resources::TextureInfo> texture_info(
         resources::TextureHandle handle) const override;
 

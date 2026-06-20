@@ -12,6 +12,7 @@
 #include <rivet/game/tileset/tileset_catalog.hpp>
 #include <rivet/game/resources/resource_pack.hpp>
 #include <rivet/physics/fluid_grid.hpp>
+#include <rivet/physics/character_controller.hpp>
 
 namespace rivet::game {
 
@@ -52,6 +53,7 @@ private:
     std::filesystem::path level_path_;
     level::LevelData level_;
     rivet::physics::FluidGrid fluids_;
+    rivet::physics::CharacterController player_controller_;
     rivet::resources::TextureHandle background_texture_ = rivet::resources::kInvalidTexture;
     std::unique_ptr<tileset::TilesetCatalog> tilesets_;
     std::optional<resources::ResourcePack> resource_pack_;
@@ -73,6 +75,7 @@ private:
     } player_motion_;
 
     bool player_grounded_ = false;
+    bool player_facing_left_ = false;
     float jump_buffer_time_ = 0.0f;
     float coyote_time_ = 0.0f;
 };

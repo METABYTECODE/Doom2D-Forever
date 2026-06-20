@@ -12,14 +12,15 @@ namespace {
     return y * width + x;
 }
 
-[[nodiscard]] Aabb immersion_probe(const Aabb& box) {
-    const float probe_height = box.height * (2.0f / 3.0f);
-    return {
-        .x = box.x,
-        .y = box.y + (box.height - probe_height),
-        .width = box.width,
-        .height = probe_height,
-    };
+[[nodiscard]] float intersection_area(const Aabb& a, const Aabb& b) {
+    const float x0 = std::max(a.x, b.x);
+    const float y0 = std::max(a.y, b.y);
+    const float x1 = std::min(a.x + a.width, b.x + b.width);
+    const float y1 = std::min(a.y + a.height, b.y + b.height);
+    if (x1 <= x0 || y1 <= y0) {
+        return 0.0f;
+    }
+    return (x1 - x0) * (y1 - y0);
 }
 
 } // namespace
@@ -66,21 +67,22 @@ std::uint8_t FluidGrid::at_cell(const int x, const int y) const {
 }
 
 FluidGrid::Sample FluidGrid::sample_aabb(const Aabb& box) const {
-    if (cells_.empty()) {
+    if (cells_.empty() || box.width <= 0.0f || box.height <= 0.0f) {
         return {};
     }
 
-    const Aabb probe = immersion_probe(box);
-    const int x0 = std::max(0, static_cast<int>(std::floor(probe.x / cell_size_)));
-    const int y0 = std::max(0, static_cast<int>(std::floor(probe.y / cell_size_)));
+    const int x0 = std::max(0, static_cast<int>(std::floor(box.x / cell_size_)));
+    const int y0 = std::max(0, static_cast<int>(std::floor(box.y / cell_size_)));
     const int x1 = std::min(
         width_ - 1,
-        static_cast<int>(std::floor((probe.x + probe.width) / cell_size_)));
+        static_cast<int>(std::floor((box.x + box.width) / cell_size_)));
     const int y1 = std::min(
         height_ - 1,
-        static_cast<int>(std::floor((probe.y + probe.height) / cell_size_)));
+        static_cast<int>(std::floor((box.y + box.height) / cell_size_)));
 
-    std::array<int, 4> counts{};
+    const float body_area = box.width * box.height;
+    std::array<float, 4> fluid_areas{};
+
     for (int y = y0; y <= y1; ++y) {
         for (int x = x0; x <= x1; ++x) {
             const Aabb cell{
@@ -89,29 +91,34 @@ FluidGrid::Sample FluidGrid::sample_aabb(const Aabb& box) const {
                 .width = cell_size_,
                 .height = cell_size_,
             };
-            if (!probe.intersects(cell)) {
+            const float overlap = intersection_area(box, cell);
+            if (overlap <= 0.0f) {
                 continue;
             }
 
             const std::uint8_t fluid = at_cell(x, y);
-            if (fluid < counts.size()) {
-                ++counts[fluid];
+            if (fluid < fluid_areas.size()) {
+                fluid_areas[fluid] += overlap;
             }
         }
     }
 
     std::uint8_t dominant = 0;
-    int dominant_count = 0;
-    for (std::uint8_t id = 1; id < counts.size(); ++id) {
-        if (counts[id] > dominant_count) {
+    float dominant_area = 0.0f;
+    float total_fluid_area = 0.0f;
+    for (std::uint8_t id = 1; id < fluid_areas.size(); ++id) {
+        total_fluid_area += fluid_areas[id];
+        if (fluid_areas[id] > dominant_area) {
             dominant = id;
-            dominant_count = counts[id];
+            dominant_area = fluid_areas[id];
         }
     }
 
+    const float immersion = std::clamp(total_fluid_area / body_area, 0.0f, 1.0f);
     return {
         .id = dominant,
-        .immersed = dominant_count > 0,
+        .immersed = dominant > 0 && immersion > 0.02f,
+        .immersion = immersion,
     };
 }
 

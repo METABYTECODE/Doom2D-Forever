@@ -165,7 +165,8 @@ void SdlRenderer::unload_texture(const resources::TextureHandle handle) {
 void SdlRenderer::draw_texture(
     const resources::TextureHandle handle,
     const Rect& dest,
-    const Rect& source) {
+    const Rect& source,
+    const bool flip_horizontal) {
     if (renderer_ == nullptr) {
         return;
     }
@@ -177,6 +178,7 @@ void SdlRenderer::draw_texture(
 
     const Rect screen_rect = apply_camera(dest);
     const SDL_FRect target{screen_rect.x, screen_rect.y, screen_rect.width, screen_rect.height};
+    const SDL_RendererFlip flip = flip_horizontal ? SDL_FLIP_HORIZONTAL : SDL_FLIP_NONE;
 
     if (source.width > 0.0f && source.height > 0.0f) {
         const SDL_Rect src{
@@ -185,11 +187,11 @@ void SdlRenderer::draw_texture(
             static_cast<int>(source.width),
             static_cast<int>(source.height),
         };
-        SDL_RenderCopyF(renderer_, it->second, &src, &target);
+        SDL_RenderCopyExF(renderer_, it->second, &src, &target, 0.0, nullptr, flip);
         return;
     }
 
-    SDL_RenderCopyF(renderer_, it->second, nullptr, &target);
+    SDL_RenderCopyExF(renderer_, it->second, nullptr, &target, 0.0, nullptr, flip);
 }
 
 std::optional<resources::TextureInfo> SdlRenderer::texture_info(const resources::TextureHandle handle) const {

@@ -15,6 +15,7 @@
 #include <rivet/game/model/model_loader.hpp>
 #include <rivet/input/keys.hpp>
 #include <rivet/physics/aabb.hpp>
+#include <rivet/physics/character_controller.hpp>
 #include <rivet/physics/fluid_grid.hpp>
 #include <rivet/physics/physics_world.hpp>
 #include <rivet/physics/tile_collider.hpp>
@@ -24,18 +25,8 @@ namespace rivet::game {
 
 namespace {
 
-constexpr float kMoveSpeed = 288.0f;
-constexpr float kMoveAccel = 1800.0f;
-constexpr float kMoveDecel = 2400.0f;
-constexpr float kGravity = 648.0f;
-constexpr float kJumpSpeed = 360.0f;
-constexpr float kMaxFallSpeed = 1080.0f;
 constexpr float kJumpBufferTime = 0.12f;
 constexpr float kCoyoteTime = 0.1f;
-constexpr float kWaterGravity = 72.0f;
-constexpr float kWaterMaxFallSpeed = 120.0f;
-constexpr float kSwimSpeed = 220.0f;
-constexpr float kWaterDrag = 14.0f;
 constexpr float kDefaultZoom = 2.0f;
 
 [[nodiscard]] float snap_world(const float value) {
@@ -54,30 +45,6 @@ constexpr float kDefaultZoom = 2.0f;
         .b = static_cast<std::uint8_t>(60 + ((hash / 49) % 120)),
         .a = 255,
     };
-}
-
-void apply_horizontal_accel(
-    float& velocity_x,
-    const float target_x,
-    const float fixed_delta_time) {
-    if (velocity_x < target_x) {
-        velocity_x = std::min(target_x, velocity_x + kMoveAccel * fixed_delta_time);
-    } else if (velocity_x > target_x) {
-        velocity_x = std::max(target_x, velocity_x - kMoveDecel * fixed_delta_time);
-    }
-}
-
-void apply_drag(float& velocity, const float drag, const float fixed_delta_time) {
-    if (std::abs(velocity) <= 1.0f) {
-        velocity = 0.0f;
-        return;
-    }
-
-    if (velocity > 0.0f) {
-        velocity = std::max(0.0f, velocity - drag * fixed_delta_time);
-    } else {
-        velocity = std::min(0.0f, velocity + drag * fixed_delta_time);
-    }
 }
 
 } // namespace
@@ -209,6 +176,7 @@ void LevelGame::on_detach(rivet::core::GameContext& context) {
     player_grounded_ = false;
     jump_buffer_time_ = 0.0f;
     coyote_time_ = 0.0f;
+    player_facing_left_ = false;
     player_motion_ = {};
 }
 
@@ -264,7 +232,24 @@ void LevelGame::on_update(rivet::core::GameContext& context, float delta_time) {
     animation_time_ += delta_time;
 
     if (context.input().is_key_pressed(rivet::input::Key::Space)) {
-        jump_buffer_time_ = kJumpBufferTime;
+        bool in_fluid = false;
+        if (auto* scene = active_level(context)) {
+            if (scene->player_entity() != rivet::ecs::kNullEntity) {
+                const auto& registry = scene->world().registry();
+                const auto& transform =
+                    registry.get<rivet::ecs::components::Transform>(scene->player_entity());
+                const auto& collider =
+                    registry.get<rivet::ecs::components::Collider>(scene->player_entity());
+                const auto fluid_sample =
+                    fluids_.sample_aabb(rivet::physics::make_aabb(transform, collider));
+                in_fluid = fluid_sample.id != 0 &&
+                           fluid_sample.immersion >
+                               player_controller_.config().immersion_threshold;
+            }
+        }
+        if (!in_fluid) {
+            jump_buffer_time_ = kJumpBufferTime;
+        }
     }
     jump_buffer_time_ = std::max(0.0f, jump_buffer_time_ - delta_time);
 
@@ -307,28 +292,38 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
         const auto& collider = registry.get<rivet::ecs::components::Collider>(scene->player_entity());
 
         const auto fluid_sample = fluids_.sample_aabb(rivet::physics::make_aabb(transform, collider));
-        const bool in_fluid = fluid_sample.immersed && fluid_sample.id != 0;
-        const bool swim_up = context.input().is_key_down(rivet::input::Key::Space);
+        const bool in_water =
+            fluid_sample.id != 0 &&
+            fluid_sample.immersion > player_controller_.config().immersion_threshold;
+        const float move_x = context.input().state().move_x;
 
-        const float target_vx = context.input().state().move_x * (in_fluid ? kSwimSpeed : kMoveSpeed);
-        apply_horizontal_accel(velocity.x, target_vx, fixed_delta_time);
+        if (move_x < -0.05f) {
+            player_facing_left_ = true;
+        } else if (move_x > 0.05f) {
+            player_facing_left_ = false;
+        }
 
-        if (in_fluid) {
-            if (swim_up) {
-                velocity.y = -kSwimSpeed;
-            } else {
-                velocity.y += kWaterGravity * fixed_delta_time;
-                velocity.y = std::min(velocity.y, kWaterMaxFallSpeed);
-            }
-            apply_drag(velocity.x, kWaterDrag, fixed_delta_time);
-            apply_drag(velocity.y, kWaterDrag, fixed_delta_time);
+        rivet::physics::CharacterController::Input controller_input;
+        controller_input.move_x = move_x;
+        controller_input.jump_held = context.input().is_key_down(rivet::input::Key::Space);
+
+        rivet::physics::CharacterController::Environment controller_env;
+        controller_env.in_water = in_water;
+        controller_env.grounded = player_grounded_;
+
+        player_controller_.simulate(
+            velocity.x,
+            velocity.y,
+            controller_input,
+            controller_env,
+            fixed_delta_time);
+
+        if (in_water) {
+            jump_buffer_time_ = 0.0f;
         } else {
-            velocity.y += kGravity * fixed_delta_time;
-            velocity.y = std::min(velocity.y, kMaxFallSpeed);
-
             const bool can_jump = player_grounded_ || coyote_time_ > 0.0f;
             if (can_jump && jump_buffer_time_ > 0.0f) {
-                velocity.y = -kJumpSpeed;
+                velocity.y = -player_controller_.config().jump_speed;
                 jump_buffer_time_ = 0.0f;
                 coyote_time_ = 0.0f;
                 if (!jump_sfx_path_.empty() && context.has_service<rivet::audio::AudioSystem>()) {
@@ -336,6 +331,7 @@ void LevelGame::on_fixed_update(rivet::core::GameContext& context, float fixed_d
                 }
             }
         }
+
     }
 
     if (context.has_service<rivet::physics::PhysicsWorld>()) {
@@ -389,6 +385,7 @@ void LevelGame::draw_level_world(
         rivet::render::Rect source{};
         rivet::render::Color fallback{};
         bool use_fallback = false;
+        bool flip_horizontal = false;
     };
 
     std::vector<DrawItem> items;
@@ -437,6 +434,7 @@ void LevelGame::draw_level_world(
                     player_model_->pivot,
                     frame.frame_width,
                     frame.frame_height);
+                player_item.flip_horizontal = player_facing_left_;
             } else {
                 player_item.use_fallback = true;
                 player_item.fallback = {.r = 220, .g = 90, .b = 70, .a = 255};
@@ -473,7 +471,7 @@ void LevelGame::draw_level_world(
 
     for (const auto& item : items) {
         if (!item.use_fallback && item.texture != rivet::resources::kInvalidTexture) {
-            renderer.draw_texture(item.texture, item.dest, item.source);
+            renderer.draw_texture(item.texture, item.dest, item.source, item.flip_horizontal);
         } else if (item.use_fallback) {
             renderer.draw_filled_rect(item.dest, item.fallback);
         }
