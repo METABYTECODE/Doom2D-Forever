@@ -551,7 +551,7 @@ export function LevelCanvas({
       const marquee = marqueeRef.current ?? lineRef.current ?? fillRef.current;
       const previewCells = previewCellsRef.current;
       const previewFootprints = previewFootprintsRef.current;
-      const { gridSize } = subGridDimensions(lvl);
+      const { gridSize, cols, rows } = subGridDimensions(lvl);
       const rect = container.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;

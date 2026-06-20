@@ -69,6 +69,8 @@ import { pixelAxisLinePositions, pixelFillPositions, pixelLinePositions } from "
 
 import { subGridDimensions, worldToSubCell } from "./lib/sub-grid";
 
+import { validateLevel } from "./lib/level-validation";
+
 import { playerPlacementPivot } from "./lib/object-collider";
 
 import {
