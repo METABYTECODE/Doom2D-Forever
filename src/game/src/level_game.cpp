@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 #include <rivet/ecs/components/collider.hpp>
 #include <rivet/ecs/components/physics_contacts.hpp>
@@ -89,7 +90,18 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
     fluids_ = rivet::physics::FluidGrid::from_grid(
         level_.fluids,
         static_cast<float>(level_.grid_size));
-    context.scenes().push(std::make_unique<LevelScene>(level_));
+
+    if (const auto assets = resources::resolve_assets_root()) {
+        assets_root_ = *assets;
+        resource_pack_ = resources::ResourcePack::load(assets_root_, level_.resource_pack);
+    }
+
+    level::LevelSpawnContext spawn_context;
+    if (resource_pack_.has_value()) {
+        spawn_context.pack = &*resource_pack_;
+    }
+
+    context.scenes().push(std::make_unique<LevelScene>(level_, spawn_context));
 
     if (context.has_service<rivet::physics::PhysicsWorld>()) {
         auto& physics = context.service<rivet::physics::PhysicsWorld>();
@@ -108,11 +120,6 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
                 .enabled = true,
             });
         }
-    }
-
-    if (const auto assets = resources::resolve_assets_root()) {
-        assets_root_ = *assets;
-        resource_pack_ = resources::ResourcePack::load(assets_root_, level_.resource_pack);
     }
 
     if (context.has_service<rivet::resources::ResourceManager>()) {
@@ -148,9 +155,11 @@ void LevelGame::on_attach(rivet::core::GameContext& context) {
                     player_model_ = std::move(*loaded);
                     player_animator_.set_model(&*player_model_);
                     spdlog::info(
-                        "Loaded player model: {} ({} animations)",
+                        "Loaded player model: {} ({} animations, collider {:.0f}x{:.0f})",
                         player_model_->id,
-                        player_model_->animations.size());
+                        player_model_->animations.size(),
+                        player_model_->collider.width,
+                        player_model_->collider.height);
                 } else {
                     spdlog::warn("Failed to load player model from {}", model_path->string());
                 }
@@ -360,39 +369,130 @@ void LevelGame::draw_level_background(
         });
 }
 
-void LevelGame::draw_level_tiles(
+void LevelGame::draw_level_world(
     rivet::render::IRenderer& renderer,
     const level::LevelData& data,
-    const float animation_time) {
+    const float animation_time,
+    const float player_pivot_x,
+    const float player_pivot_y,
+    const float player_collider_offset_x,
+    const float player_collider_offset_y,
+    const float player_collider_width,
+    const float player_collider_height,
+    const int player_z,
+    const bool draw_player) {
+    struct DrawItem {
+        int z = 0;
+        float sort_y = 0.0f;
+        rivet::resources::TextureHandle texture = rivet::resources::kInvalidTexture;
+        rivet::render::Rect dest{};
+        rivet::render::Rect source{};
+        rivet::render::Color fallback{};
+        bool use_fallback = false;
+    };
+
+    std::vector<DrawItem> items;
     const float cell_size = static_cast<float>(data.grid_size);
 
-    for (const auto& tile : data.tiles) {
-        const auto frame = level::tile_frame_at_time(tile, animation_time);
-        const tileset::TilesetDef* def = tilesets_ ? tilesets_->find(frame.tileset) : nullptr;
+    for (const auto& layer : data.tile_layers) {
+        for (const auto& tile : layer.tiles) {
+            const auto frame = level::tile_frame_at_time(tile, animation_time);
+            const tileset::TilesetDef* def = tilesets_ ? tilesets_->find(frame.tileset) : nullptr;
 
-        const rivet::render::Rect dest =
-            def != nullptr
-                ? tileset::tile_dest_rect(*def, static_cast<float>(tile.x), static_cast<float>(tile.y))
-                : rivet::render::Rect{
-                      .x = static_cast<float>(tile.x),
-                      .y = static_cast<float>(tile.y),
-                      .width = cell_size,
-                      .height = cell_size,
-                  };
+            DrawItem item;
+            item.z = layer.z;
+            item.dest =
+                def != nullptr
+                    ? tileset::tile_dest_rect(*def, static_cast<float>(tile.x), static_cast<float>(tile.y))
+                    : rivet::render::Rect{
+                          .x = static_cast<float>(tile.x),
+                          .y = static_cast<float>(tile.y),
+                          .width = cell_size,
+                          .height = cell_size,
+                      };
+            item.sort_y = item.dest.y + item.dest.height;
 
-        if (def != nullptr && def->texture != rivet::resources::kInvalidTexture) {
-            renderer.draw_texture(
-                def->texture,
-                dest,
-                tileset::tile_source_rect(*def, frame.id));
-            continue;
+            if (def != nullptr && def->texture != rivet::resources::kInvalidTexture) {
+                item.texture = def->texture;
+                item.source = tileset::tile_source_rect(*def, frame.id);
+            } else {
+                item.use_fallback = true;
+                item.fallback = fallback_tile_color(frame.tileset, frame.id);
+            }
+            items.push_back(item);
         }
+    }
 
-        renderer.draw_filled_rect(dest, fallback_tile_color(frame.tileset, frame.id));
+    if (draw_player) {
+        DrawItem player_item;
+        player_item.z = player_z;
+        if (player_model_.has_value() && player_animator_.has_clip()) {
+            const auto frame = player_animator_.current_frame();
+            if (frame.texture != rivet::resources::kInvalidTexture) {
+                player_item.texture = frame.texture;
+                player_item.source = frame.source;
+                player_item.dest = model::model_sprite_dest_rect(
+                    player_pivot_x,
+                    player_pivot_y,
+                    player_model_->pivot,
+                    frame.frame_width,
+                    frame.frame_height);
+            } else {
+                player_item.use_fallback = true;
+                player_item.fallback = {.r = 220, .g = 90, .b = 70, .a = 255};
+                player_item.dest = {
+                    .x = player_pivot_x + player_collider_offset_x,
+                    .y = player_pivot_y + player_collider_offset_y,
+                    .width = player_collider_width,
+                    .height = player_collider_height,
+                };
+            }
+        } else {
+            player_item.use_fallback = true;
+            player_item.fallback = {.r = 220, .g = 90, .b = 70, .a = 255};
+            player_item.dest = {
+                .x = player_pivot_x + player_collider_offset_x,
+                .y = player_pivot_y + player_collider_offset_y,
+                .width = player_collider_width,
+                .height = player_collider_height,
+            };
+        }
+        player_item.sort_y = player_item.dest.y + player_item.dest.height;
+        items.push_back(player_item);
+    }
+
+    std::stable_sort(
+        items.begin(),
+        items.end(),
+        [](const DrawItem& a, const DrawItem& b) {
+            if (a.z != b.z) {
+                return a.z < b.z;
+            }
+            return a.sort_y < b.sort_y;
+        });
+
+    for (const auto& item : items) {
+        if (!item.use_fallback && item.texture != rivet::resources::kInvalidTexture) {
+            renderer.draw_texture(item.texture, item.dest, item.source);
+        } else if (item.use_fallback) {
+            renderer.draw_filled_rect(item.dest, item.fallback);
+        }
     }
 }
 
-void LevelGame::update_player_animation(const float delta_time, const float velocity_x, const float velocity_y) {
+int LevelGame::player_render_z() const {
+    for (const auto& object : level_.objects) {
+        if (object.type == "player") {
+            return object.z;
+        }
+    }
+    return 0;
+}
+
+void LevelGame::update_player_animation(
+    const float delta_time,
+    const float velocity_x,
+    const float velocity_y) {
     if (!player_model_.has_value()) {
         return;
     }
@@ -401,32 +501,6 @@ void LevelGame::update_player_animation(const float delta_time, const float velo
         model::select_player_locomotion_animation(player_grounded_, velocity_x, velocity_y);
     player_animator_.set_animation(desired, false);
     player_animator_.update(delta_time);
-}
-
-void LevelGame::draw_player_sprite(
-    rivet::render::IRenderer& renderer,
-    const float render_x,
-    const float render_y,
-    const float collider_width,
-    const float collider_height) const {
-    if (player_model_.has_value() && player_animator_.has_clip()) {
-        const auto frame = player_animator_.current_frame();
-        if (frame.texture != rivet::resources::kInvalidTexture) {
-            const auto dest = model::model_sprite_dest_rect(
-                render_x,
-                render_y,
-                collider_width,
-                collider_height,
-                frame.frame_width,
-                frame.frame_height);
-            renderer.draw_texture(frame.texture, dest, frame.source);
-            return;
-        }
-    }
-
-    renderer.draw_filled_rect(
-        {.x = render_x, .y = render_y, .width = collider_width, .height = collider_height},
-        {.r = 220, .g = 90, .b = 70, .a = 255});
 }
 
 void LevelGame::on_render(rivet::core::GameContext& context, float interpolation_alpha) {
@@ -455,18 +529,38 @@ void LevelGame::on_render(rivet::core::GameContext& context, float interpolation
 
         update_camera(
             context,
-            render_x + collider.width * 0.5f,
-            render_y + collider.height * 0.5f);
+            render_x + collider.offset_x + collider.width * 0.5f,
+            render_y + collider.offset_y + collider.height * 0.5f);
 
         draw_level_background(renderer, *scene);
-        draw_level_tiles(renderer, data, animation_time_);
-
-        draw_player_sprite(renderer, render_x, render_y, collider.width, collider.height);
+        draw_level_world(
+            renderer,
+            data,
+            animation_time_,
+            render_x,
+            render_y,
+            collider.offset_x,
+            collider.offset_y,
+            collider.width,
+            collider.height,
+            player_render_z(),
+            true);
         return;
     }
 
     draw_level_background(renderer, *scene);
-    draw_level_tiles(renderer, data, animation_time_);
+    draw_level_world(
+        renderer,
+        data,
+        animation_time_,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0.0f,
+        0,
+        false);
 }
 
 } // namespace rivet::game

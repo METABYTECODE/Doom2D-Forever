@@ -44,6 +44,9 @@ namespace {
     if (object.vel_y != 0.0f) {
         json["vy"] = object.vel_y;
     }
+    if (object.z != 0) {
+        json["z"] = object.z;
+    }
     return json;
 }
 
@@ -61,6 +64,18 @@ namespace {
         }
         json["frames"] = std::move(frames);
         json["frame_ms"] = tile.frame_ms;
+    }
+    return json;
+}
+
+[[nodiscard]] nlohmann::json tile_layer_to_json(const TileLayer& layer) {
+    nlohmann::json json = {
+        {"id", layer.id},
+        {"z", layer.z},
+        {"tiles", nlohmann::json::array()},
+    };
+    for (const auto& tile : layer.tiles) {
+        json["tiles"].push_back(placed_tile_to_json(tile));
     }
     return json;
 }
@@ -96,6 +111,11 @@ void save_level(const std::filesystem::path& path, const LevelData& level) {
         }
     }
 
+    nlohmann::json tile_layers = nlohmann::json::array();
+    for (const auto& layer : level.tile_layers) {
+        tile_layers.push_back(tile_layer_to_json(layer));
+    }
+
     nlohmann::json json = {
         {"format", LevelData::kFormatId},
         {"version", LevelData::kVersion},
@@ -103,7 +123,7 @@ void save_level(const std::filesystem::path& path, const LevelData& level) {
         {"grid_size", level.grid_size},
         {"width", level.width},
         {"height", level.height},
-        {"tiles", nlohmann::json::array()},
+        {"tile_layers", std::move(tile_layers)},
         {"collision", level.collision},
         {"objects", nlohmann::json::array()},
     };
@@ -120,10 +140,6 @@ void save_level(const std::filesystem::path& path, const LevelData& level) {
     }
     if (level.resource_pack != resources::kDefaultPackId) {
         json["resource_pack"] = level.resource_pack;
-    }
-
-    for (const auto& tile : level.tiles) {
-        json["tiles"].push_back(placed_tile_to_json(tile));
     }
 
     for (const auto& object : level.objects) {

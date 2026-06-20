@@ -32,15 +32,22 @@ private:
         float player_center_x,
         float player_center_y) const;
     void draw_level_background(rivet::render::IRenderer& renderer, const LevelScene& scene) const;
-    void draw_level_tiles(rivet::render::IRenderer& renderer, const level::LevelData& data, float animation_time);
+    void draw_level_world(
+        rivet::render::IRenderer& renderer,
+        const level::LevelData& data,
+        float animation_time,
+        float player_pivot_x,
+        float player_pivot_y,
+        float player_collider_offset_x,
+        float player_collider_offset_y,
+        float player_collider_width,
+        float player_collider_height,
+        int player_z,
+        bool draw_player);
+
     void update_patrols(rivet::ecs::World& world, const std::vector<rivet::ecs::Entity>& patrols);
     void update_player_animation(float delta_time, float velocity_x, float velocity_y);
-    void draw_player_sprite(
-        rivet::render::IRenderer& renderer,
-        float render_x,
-        float render_y,
-        float collider_width,
-        float collider_height) const;
+    [[nodiscard]] int player_render_z() const;
 
     std::filesystem::path level_path_;
     level::LevelData level_;

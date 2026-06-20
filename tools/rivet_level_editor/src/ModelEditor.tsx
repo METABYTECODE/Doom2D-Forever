@@ -13,9 +13,11 @@ import { ModelPreviewCanvas } from "./components/ModelPreviewCanvas";
 import { useModelHistory } from "./hooks/useModelHistory";
 import { suggestColumns } from "./lib/model-atlas";
 import {
+  applyFeetPivotPreset,
   createBlankModel,
   defaultAnimation,
   downloadModel,
+  fullFrameHull,
   parseModelJson,
   serializeModel,
 } from "./lib/model-io";
@@ -287,6 +289,8 @@ export function ModelEditor() {
             <ModelPreviewCanvas
               image={currentImage}
               animation={currentAnim}
+              pivot={model.pivot}
+              collider={model.collider}
               playing={playing}
               frameIndex={frameIndex}
               onFrameIndexChange={setFrameIndex}
@@ -313,6 +317,22 @@ export function ModelEditor() {
           playing={playing}
           frameIndex={frameIndex}
           onModelPatch={(patch) => update((prev) => ({ ...prev, ...patch }))}
+          onPivotPatch={(patch) =>
+            update((prev) => ({ ...prev, pivot: { ...prev.pivot, ...patch } }))
+          }
+          onColliderPatch={(patch) =>
+            update((prev) => ({ ...prev, collider: { ...prev.collider, ...patch } }))
+          }
+          onApplyFeetPreset={() =>
+            update((prev) => ({ ...prev, ...applyFeetPivotPreset(prev, currentAnim) }))
+          }
+          onApplyFullFrameHull={() => {
+            if (!currentAnim) return;
+            update((prev) => ({
+              ...prev,
+              collider: fullFrameHull(currentAnim.frame_width, currentAnim.frame_height),
+            }));
+          }}
           onAnimPatch={patchAnimation}
           onAtlasChange={onAtlasChange}
           onAddFrame={() => openPicker("add-frame")}

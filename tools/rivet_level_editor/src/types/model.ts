@@ -1,5 +1,5 @@
 export const MODEL_FORMAT = "rivet-model";
-export const MODEL_VERSION = 2;
+export const MODEL_VERSION = 3;
 
 export const BUILTIN_ANIMATIONS = [
   "IDLE",
@@ -20,6 +20,20 @@ export const DEFAULT_FRAME_MS = 120;
 export const DEFAULT_FRAME_WIDTH = 64;
 export const DEFAULT_FRAME_HEIGHT = 64;
 export const DEFAULT_COLUMNS = 1;
+
+/** Entity attachment point in reference frame space (pixels, top-left origin). */
+export interface ModelPivot {
+  x: number;
+  y: number;
+}
+
+/** Physics hull in reference frame space — same coords as the sprite frame. */
+export interface ModelCollider {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface ModelFrame {
   id: number;
@@ -42,5 +56,7 @@ export interface ModelData {
   id: string;
   name: string;
   resource_pack: string;
+  pivot: ModelPivot;
+  collider: ModelCollider;
   animations: Record<string, ModelAnimation>;
 }

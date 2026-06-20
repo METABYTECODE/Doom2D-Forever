@@ -8,10 +8,14 @@ import type {
   LevelObject,
   ObjectTool,
   PaintFluidOption,
+  TileLayer,
 } from "../types/level";
 import { isAnimatedPlacement, placementFrames as getPlacementFrames } from "../lib/tile-animation";
+import { findPlacementRef, tileLayerHint, tileLayerLabel } from "../lib/level-tile-layers";
 import { clampBrushSize } from "../lib/brush";
 import type { TilesetDef } from "../types/tileset";
+import type { ModelData } from "../types/model";
+import { modelColliderForObject, resolveModelId } from "../lib/object-collider";
 import { TilePreview } from "./TilePreview";
 import { ContentAssetField } from "./ContentAssetField";
 import type { PackAsset } from "../lib/resource-pack";
@@ -144,10 +148,13 @@ interface OptionsBarProps {
   objectTool: ObjectTool;
   fluidPaint: FluidPaint;
   brushSize: number;
+  tileLayers: TileLayer[];
+  activeTileLayerId: string;
   onGridToolChange: (tool: GridTool) => void;
   onObjectToolChange: (tool: ObjectTool) => void;
   onFluidPaintChange: (paint: FluidPaint) => void;
   onBrushSizeChange: (size: number) => void;
+  onTileLayerChange: (layerId: string) => void;
 }
 
 export function OptionsBar({
@@ -156,10 +163,13 @@ export function OptionsBar({
   objectTool,
   fluidPaint,
   brushSize,
+  tileLayers,
+  activeTileLayerId,
   onGridToolChange,
   onObjectToolChange,
   onFluidPaintChange,
   onBrushSizeChange,
+  onTileLayerChange,
 }: OptionsBarProps) {
   const size = clampBrushSize(brushSize);
   const showBrushSize =
@@ -194,6 +204,22 @@ export function OptionsBar({
               </button>
             ))}
           </div>
+          {mode === "tiles" && (
+            <label className="options-field options-field-layer">
+              <span>Layer</span>
+              <select
+                value={activeTileLayerId}
+                onChange={(e) => onTileLayerChange(e.target.value)}
+              >
+                {tileLayers.map((layer) => (
+                  <option key={layer.id} value={layer.id}>
+                    {tileLayerLabel(layer)}
+                  </option>
+                ))}
+              </select>
+              <span className="options-hint">{tileLayerHint(activeTileLayerId)}</span>
+            </label>
+          )}
           {mode === "fluids" && gridTool !== "erase" && (
             <label className="options-field">
               <span>Type</span>
@@ -279,7 +305,7 @@ export function TilesetDock({
       </label>
       <button type="button" className="tile-preview-btn" onClick={onOpenPicker}>
         <TilePreview tileset={tileset} image={image} tileId={selectedTileId} />
-        <span className="tile-preview-hint">Click to open atlas · tile #{selectedTileId}</span>
+        <span className="tile-preview-hint">#{selectedTileId}</span>
       </button>
       <div className="dock-layers">
         <label className="check-row dock-check">
@@ -317,6 +343,7 @@ interface InspectorProps {
   tilesetImages: Map<string, HTMLImageElement>;
   backgroundAssets: PackAsset[];
   soundAssets: PackAsset[];
+  modelCatalog: Map<string, ModelData>;
   snapGrid: boolean;
   onLevelPatch: (patch: Partial<LevelData>) => void;
   onResizeMap: (w: number, h: number) => void;
@@ -339,6 +366,7 @@ export function Inspector({
   tilesetImages,
   backgroundAssets,
   soundAssets,
+  modelCatalog,
   snapGrid,
   onLevelPatch,
   onResizeMap,
@@ -363,11 +391,13 @@ export function Inspector({
     setDraftGrid(level.grid_size);
   }, [level.grid_size]);
 
-  const placement = selectedPlacement >= 0 ? level.tiles[selectedPlacement] : null;
+  const placement =
+    selectedPlacement >= 0 ? findPlacementRef(level, selectedPlacement)?.tile ?? null : null;
   const frames = placement ? getPlacementFrames(placement) : [];
 
   return (
-    <aside className="inspector">
+    <aside className="inspector-panel">
+      <div className="inspector-body inspector-scroll">
       <section className="inspector-section">
         <h3>Map</h3>
         <label>
@@ -398,20 +428,15 @@ export function Inspector({
             />
           </label>
         </div>
-        <p className="hint mono">
-          {level.width}×{level.height} px · snap {level.grid_size}px
-        </p>
-        <p className="hint">
-          Resource pack: <span className="mono">{level.resource_pack || "dev"}</span>
-          {" · "}
-          {tilesets.size} tilesets, {backgroundAssets.length} backgrounds, {soundAssets.length} tracks
+        <p className="inspector-meta mono">
+          {level.width}×{level.height} · grid {level.grid_size} · {level.resource_pack || "dev"}
         </p>
         <ContentAssetField
           label="Background"
           value={level.background}
           assets={backgroundAssets}
           variant="image"
-          emptyHint="Add images to src/resourcepacks/dev/textures/backgrounds/"
+          emptyHint="textures/backgrounds/"
           onChange={(background) => onLevelPatch({ background })}
         />
         <ContentAssetField
@@ -419,7 +444,7 @@ export function Inspector({
           value={level.music}
           assets={soundAssets}
           variant="audio"
-          emptyHint="Add tracks to src/resourcepacks/dev/audio/music/"
+          emptyHint="audio/music/"
           onChange={(music) => onLevelPatch({ music })}
         />
         <label className="check-row">
@@ -451,9 +476,9 @@ export function Inspector({
         <section className="inspector-section">
           <h3>Selected tile{selectedPlacementCount > 1 ? "s" : ""}</h3>
           {selectedPlacementCount > 1 ? (
-            <p className="hint">{selectedPlacementCount} tiles selected · drag to move</p>
+            <p className="inspector-meta">{selectedPlacementCount} selected</p>
           ) : placement ? (
-            <p className="mono">
+            <p className="mono inspector-meta">
               {placement.tileset}:{placement.id} @ {placement.x},{placement.y}
             </p>
           ) : null}
@@ -568,38 +593,41 @@ export function Inspector({
               />
             </label>
           </div>
-          <div className="field-row">
-            <label>
-              width
-              <input
-                type="number"
-                min={1}
-                value={selected.width}
-                onChange={(e) => onObjectPatch({ width: Number(e.target.value) })}
-              />
-            </label>
-            <label>
-              height
-              <input
-                type="number"
-                min={1}
-                value={selected.height}
-                onChange={(e) => onObjectPatch({ height: Number(e.target.value) })}
-              />
-            </label>
-          </div>
+          {selected.type === "player" || selected.model ? (
+            <p className="inspector-meta mono">
+              {resolveModelId(selected) ?? "?"} ·{" "}
+              {modelColliderForObject(selected, modelCatalog).width}×
+              {modelColliderForObject(selected, modelCatalog).height}
+            </p>
+          ) : (
+            <div className="field-row">
+              <label>
+                width
+                <input
+                  type="number"
+                  min={1}
+                  value={selected.width ?? 48}
+                  onChange={(e) => onObjectPatch({ width: Number(e.target.value) })}
+                />
+              </label>
+              <label>
+                height
+                <input
+                  type="number"
+                  min={1}
+                  value={selected.height ?? 48}
+                  onChange={(e) => onObjectPatch({ height: Number(e.target.value) })}
+                />
+              </label>
+            </div>
+          )}
           <button type="button" className="danger-btn" onClick={onDeleteObject}>
             Delete object
           </button>
         </section>
       )}
 
-      <section className="inspector-section">
-        <h3>Stats</h3>
-        <p className="hint">
-          Tiles: {level.tiles.length} · Objects: {level.objects.length}
-        </p>
-      </section>
+      </div>
     </aside>
   );
 }

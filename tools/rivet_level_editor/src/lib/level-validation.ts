@@ -1,7 +1,12 @@
 import { FLUID_NONE, LEVEL_FORMAT, LEVEL_VERSION, type LevelData } from "../types/level";
+import { modelColliderForObject } from "./object-collider";
 import { subGridCols, subGridRows, snapGridSize } from "./sub-grid";
+import type { ModelData } from "../types/model";
 
-export function validateLevel(level: LevelData): string[] {
+export function validateLevel(
+  level: LevelData,
+  models: ReadonlyMap<string, ModelData> = new Map(),
+): string[] {
   const errors: string[] = [];
   const gridSize = snapGridSize(level);
   const cols = subGridCols(level.width, gridSize);
@@ -41,23 +46,28 @@ export function validateLevel(level: LevelData): string[] {
   const players = level.objects.filter((o) => o.type === "player");
   if (players.length > 1) errors.push("More than one player object");
 
-  for (const tile of level.tiles) {
-    if (!tile.tileset.trim()) errors.push("Placed tile with empty tileset id");
-    if (tile.x < 0 || tile.y < 0) errors.push("Placed tile with negative coordinates");
-    if (tile.frames) {
-      for (const frame of tile.frames) {
-        if (!frame.tileset.trim()) errors.push("Animated tile frame with empty tileset id");
+  for (const layer of level.tile_layers) {
+    for (const tile of layer.tiles) {
+      if (!tile.tileset.trim()) errors.push("Placed tile with empty tileset id");
+      if (tile.x < 0 || tile.y < 0) errors.push("Placed tile with negative coordinates");
+      if (tile.frames) {
+        for (const frame of tile.frames) {
+          if (!frame.tileset.trim()) errors.push("Animated tile frame with empty tileset id");
+        }
+        if (tile.frames.length === 1) errors.push("Animated tile has only one frame");
       }
-      if (tile.frames.length === 1) errors.push("Animated tile has only one frame");
-    }
-    if (tile.frame_ms != null && tile.frame_ms <= 0) {
-      errors.push("frame_ms must be positive");
+      if (tile.frame_ms != null && tile.frame_ms <= 0) {
+        errors.push("frame_ms must be positive");
+      }
     }
   }
 
   for (const object of level.objects) {
     if (!object.type.trim()) errors.push("Object with empty type");
-    if (object.width <= 0 || object.height <= 0) errors.push(`Invalid size for ${object.id || object.type}`);
+    const { width, height } = modelColliderForObject(object, models);
+    if (width <= 0 || height <= 0) {
+      errors.push(`Invalid collider size for ${object.id || object.type}`);
+    }
   }
 
   return errors;

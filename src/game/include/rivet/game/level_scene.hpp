@@ -8,7 +8,7 @@ namespace rivet::game {
 
 class LevelScene final : public rivet::scene::Scene {
 public:
-    explicit LevelScene(level::LevelData data);
+    explicit LevelScene(level::LevelData data, level::LevelSpawnContext spawn_context = {});
 
     [[nodiscard]] const level::LevelData& data() const { return data_; }
     [[nodiscard]] rivet::ecs::Entity player_entity() const { return spawn_.player; }
@@ -21,6 +21,7 @@ protected:
 
 private:
     level::LevelData data_;
+    level::LevelSpawnContext spawn_context_;
     level::LevelSpawnResult spawn_;
 };
 

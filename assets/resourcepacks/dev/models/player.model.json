@@ -1,10 +1,33 @@
 {
   "format": "rivet-model",
-  "version": 2,
+  "version": 3,
   "id": "player",
   "name": "player",
   "resource_pack": "dev",
+  "pivot": {
+    "x": 32,
+    "y": 64
+  },
+  "collider": {
+    "x": 15,
+    "y": 11,
+    "width": 34,
+    "height": 53
+  },
   "animations": {
+    "FALL": {
+      "atlas": "player/man_go",
+      "frame_width": 64,
+      "frame_height": 64,
+      "columns": 4,
+      "frames": [
+        {
+          "id": 3
+        }
+      ],
+      "frame_ms": 120,
+      "loop": true
+    },
     "FIRE": {
       "atlas": "player/man_attack",
       "frame_width": 64,
@@ -32,6 +55,19 @@
         }
       ],
       "frame_ms": 240,
+      "loop": true
+    },
+    "JUMP": {
+      "atlas": "player/man_go",
+      "frame_width": 64,
+      "frame_height": 64,
+      "columns": 4,
+      "frames": [
+        {
+          "id": 1
+        }
+      ],
+      "frame_ms": 120,
       "loop": true
     },
     "WALK": {

@@ -1,8 +1,6 @@
 export const LEVEL_FORMAT = "rivet-level" as const;
-export const LEVEL_VERSION = 3;
+export const LEVEL_VERSION = 4;
 export const GRID_SIZE = 16;
-export const DEFAULT_PLAYER_WIDTH = 34;
-export const DEFAULT_PLAYER_HEIGHT = 52;
 export const DEFAULT_MAP_WIDTH_PX = 640;
 export const DEFAULT_MAP_HEIGHT_PX = 480;
 
@@ -11,10 +9,15 @@ export interface LevelObject {
   type: string;
   x: number;
   y: number;
-  width: number;
-  height: number;
+  /** Entity pivot in world pixels. Model-backed entities use model collider. */
+  width?: number;
+  height?: number;
+  /** rivet-model id — default `player` for player spawn points. */
+  model?: string;
   vel_x: number;
   vel_y: number;
+  /** Render depth — lower values draw farther away. */
+  z?: number;
 }
 
 export interface TileFrame {
@@ -50,6 +53,12 @@ export type FluidId =
   | typeof FLUID_ACID
   | typeof FLUID_LAVA;
 
+export interface TileLayer {
+  id: string;
+  z: number;
+  tiles: PlacedTile[];
+}
+
 export interface LevelData {
   format: typeof LEVEL_FORMAT;
   version: typeof LEVEL_VERSION;
@@ -62,7 +71,7 @@ export interface LevelData {
   resource_pack: string;
   background: string;
   music: string;
-  tiles: PlacedTile[];
+  tile_layers: TileLayer[];
   collision: number[][];
   /** 0 = none, 1 = water, 2 = acid, 3 = lava */
   fluids: number[][];

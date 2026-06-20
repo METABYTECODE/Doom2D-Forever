@@ -50,21 +50,26 @@ import {
 
 import { applyTilePaintLayers, paintFluidToId } from "./lib/tile-layers";
 
+import { placementsInRect, canMovePlacements } from "./lib/tile-selection";
 import {
-
-  findPlacementAtWorld,
-
-  placeTilesAtPositions,
-
-} from "./lib/tile-placements";
+  DEFAULT_TILE_LAYER_ID,
+  findPlacementOnActiveLayerGlobal,
+  findPlacementRef,
+  flattenPlacements,
+  paintTilesOnLayer,
+  patchPlacementAtGlobal,
+  placementsInRectInLevel,
+  removePlacementsByGlobalIndices,
+  movePlacementsByGlobalIndices,
+  tileCount,
+  buildPlacementRefs,
+} from "./lib/level-tile-layers";
 
 import { pixelAxisLinePositions, pixelFillPositions, pixelLinePositions } from "./lib/tile-pixel-tools";
 
-import { placementsInRect, canMovePlacements } from "./lib/tile-selection";
-
 import { subGridDimensions, worldToSubCell } from "./lib/sub-grid";
 
-import { validateLevel } from "./lib/level-validation";
+import { playerPlacementPivot } from "./lib/object-collider";
 
 import {
 
@@ -73,7 +78,7 @@ import {
   loadPackImage,
 
   loadResourcePack,
-
+  loadModelCatalog,
   loadTilesetImage,
 
 } from "./lib/resource-pack";
@@ -96,9 +101,7 @@ import type {
 
 } from "./types/level";
 
-import { DEFAULT_FRAME_MS, DEFAULT_PLAYER_HEIGHT, DEFAULT_PLAYER_WIDTH } from "./types/level";
-
-import type { TilesetDef } from "./types/tileset";
+import { DEFAULT_FRAME_MS } from "./types/level";
 
 
 
@@ -109,6 +112,8 @@ export function App() {
     useLevelHistory(createBlankLevel());
 
   const [mode, setMode] = useState<EditorMode>("tiles");
+
+  const [activeTileLayerId, setActiveTileLayerId] = useState(DEFAULT_TILE_LAYER_ID);
 
   const [gridTool, setGridTool] = useState<GridTool>("select");
 
@@ -125,6 +130,14 @@ export function App() {
   const pack = useMemo(
 
     () => loadResourcePack(level.resource_pack || DEFAULT_PACK_ID),
+
+    [level.resource_pack],
+
+  );
+
+  const modelCatalog = useMemo(
+
+    () => loadModelCatalog(level.resource_pack || DEFAULT_PACK_ID),
 
     [level.resource_pack],
 
@@ -274,7 +287,7 @@ export function App() {
 
   const exportLevel = useCallback(() => {
 
-    const errors = validateLevel(level);
+    const errors = validateLevel(level, modelCatalog);
 
     if (errors.length > 0) {
 
@@ -320,13 +333,7 @@ export function App() {
 
     (index: number, patch: Partial<PlacedTile>) => {
 
-      update((prev) => ({
-
-        ...prev,
-
-        tiles: prev.tiles.map((tile, i) => (i === index ? { ...tile, ...patch } : tile)),
-
-      }));
+      update((prev) => patchPlacementAtGlobal(prev, index, patch));
 
     },
 
@@ -340,7 +347,7 @@ export function App() {
 
     if (selectedPlacement < 0) return;
 
-    const placement = level.tiles[selectedPlacement];
+    const placement = findPlacementRef(level, selectedPlacement)?.tile;
 
     if (!placement) return;
 
@@ -348,7 +355,7 @@ export function App() {
 
     setFramePickerOpen(true);
 
-  }, [activeTilesetId, level.tiles, selectedPlacement]);
+  }, [activeTilesetId, level, selectedPlacement]);
 
 
 
@@ -360,7 +367,7 @@ export function App() {
 
       update((prev) => {
 
-        const current = prev.tiles[selectedPlacement];
+        const current = findPlacementRef(prev, selectedPlacement)?.tile;
 
         if (!current) return prev;
 
@@ -372,21 +379,13 @@ export function App() {
 
         frames.push({ tileset: tilesetId, id: tileId });
 
-        return {
+        return patchPlacementAtGlobal(prev, selectedPlacement, {
 
-          ...prev,
+          frames,
 
-          tiles: prev.tiles.map((tile, i) =>
+          frame_ms: current.frame_ms ?? DEFAULT_FRAME_MS,
 
-            i === selectedPlacement
-
-              ? { ...tile, frames, frame_ms: tile.frame_ms ?? DEFAULT_FRAME_MS }
-
-              : tile,
-
-          ),
-
-        };
+        });
 
       });
 
@@ -418,13 +417,7 @@ export function App() {
 
     if (toRemove.size === 0) return;
 
-    update((prev) => ({
-
-      ...prev,
-
-      tiles: prev.tiles.filter((_, i) => !toRemove.has(i)),
-
-    }));
+    update((prev) => removePlacementsByGlobalIndices(prev, toRemove));
 
     setSelectedPlacement(-1);
 
@@ -484,11 +477,11 @@ export function App() {
 
         e.preventDefault();
 
-        const all = new Set(level.tiles.map((_, i) => i));
+        const all = new Set(buildPlacementRefs(level).map((ref) => ref.globalIndex));
 
         setSelectedPlacements(all);
 
-        setSelectedPlacement(level.tiles.length > 0 ? 0 : -1);
+        setSelectedPlacement(tileCount(level) > 0 ? 0 : -1);
 
         setStatus(`Selected ${all.size} tile(s)`);
 
@@ -518,7 +511,7 @@ export function App() {
 
     exportLevel,
 
-    level.tiles,
+    level.tile_layers,
 
     mode,
 
@@ -590,7 +583,7 @@ export function App() {
 
   const onMarqueeSelect = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
 
-    const hits = placementsInRect(level.tiles, tilesets, x0, y0, x1, y1);
+    const hits = placementsInRectInLevel(level, tilesets, x0, y0, x1, y1);
 
     if (additive) {
 
@@ -628,9 +621,11 @@ export function App() {
 
       const ts = tilesets.get(activeTilesetId);
 
-      const tiles = placeTilesAtPositions(
+      const painted = paintTilesOnLayer(
 
-        prev.tiles,
+        prev,
+
+        activeTileLayerId,
 
         positions,
 
@@ -638,21 +633,17 @@ export function App() {
 
         selectedTileId,
 
-        prev.width,
-
-        prev.height,
-
       );
 
-      if (tiles === prev.tiles) return prev;
+      if (painted === prev) return prev;
 
 
 
-      const collision = prev.collision.map((row) => [...row]);
+      const collision = painted.collision.map((row) => [...row]);
 
-      const fluids = prev.fluids.map((row) => [...row]);
+      const fluids = painted.fluids.map((row) => [...row]);
 
-      const { cols, rows, gridSize } = subGridDimensions(prev);
+      const { cols, rows, gridSize } = subGridDimensions(painted);
 
       let layersChanged = false;
 
@@ -702,9 +693,9 @@ export function App() {
 
 
 
-      if (!layersChanged && tiles === prev.tiles) return prev;
+      if (!layersChanged && painted === prev) return prev;
 
-      return { ...prev, tiles, collision, fluids };
+      return { ...painted, collision, fluids };
 
     });
 
@@ -716,11 +707,11 @@ export function App() {
 
     update((prev) => {
 
-      const hit = findPlacementAtWorld(prev.tiles, tilesets, worldX, worldY);
+      const hit = findPlacementOnActiveLayerGlobal(prev, activeTileLayerId, tilesets, worldX, worldY);
 
       if (hit < 0) return prev;
 
-      const nextTiles = prev.tiles.filter((_, i) => i !== hit);
+      const next = removePlacementsByGlobalIndices(prev, new Set([hit]));
 
       if (selectedPlacement === hit) {
 
@@ -732,19 +723,19 @@ export function App() {
 
       setSelectedPlacements((current) => {
 
-        const next = new Set<number>();
+        const nextSelection = new Set<number>();
 
         for (const index of current) {
 
-          if (index !== hit) next.add(index);
+          if (index !== hit) nextSelection.add(index);
 
         }
 
-        return next;
+        return nextSelection;
 
       });
 
-      return { ...prev, tiles: nextTiles };
+      return next;
 
     });
 
@@ -862,10 +853,9 @@ export function App() {
 
       if (gridTool === "erase") {
         update((prev) => {
-          const hits = placementsInRect(prev.tiles, tilesets, p0.x, p0.y, p1.x, p1.y);
+          const hits = placementsInRectInLevel(prev, tilesets, p0.x, p0.y, p1.x, p1.y);
           if (hits.length === 0) return prev;
-          const remove = new Set(hits);
-          return { ...prev, tiles: prev.tiles.filter((_, i) => !remove.has(i)) };
+          return removePlacementsByGlobalIndices(prev, new Set(hits));
         });
       } else {
         const positions = snapTileAnchors(pixelFillPositions(p0.x, p0.y, p1.x, p1.y, tw, th));
@@ -1005,7 +995,7 @@ export function App() {
 
       if (button === 2 && objectTool === "select") {
 
-        const hit = hitObject(level.objects, worldX, worldY);
+        const hit = hitObject(level.objects, worldX, worldY, modelCatalog);
 
         if (hit >= 0) {
 
@@ -1037,25 +1027,35 @@ export function App() {
 
         const isPlayer = objectTool === "place-player";
 
+        const pivot = isPlayer
+          ? snapGrid
+            ? playerPlacementPivot(pos.x, pos.y, subGridDimensions(level).gridSize)
+            : { x: worldX, y: worldY }
+          : pos;
+
         const object: LevelObject = {
 
           id: isPlayer ? "player" : `object_${level.objects.length}`,
 
           type: isPlayer ? "player" : "block",
 
-          x: pos.x,
+          x: pivot.x,
 
-          y: pos.y,
-
-          width: isPlayer ? DEFAULT_PLAYER_WIDTH : 64,
-
-          height: isPlayer ? DEFAULT_PLAYER_HEIGHT : 64,
+          y: pivot.y,
 
           vel_x: 0,
 
           vel_y: 0,
 
         };
+
+        if (!isPlayer) {
+
+          object.width = 64;
+
+          object.height = 64;
+
+        }
 
         update((prev) => ({ ...prev, objects: [...prev.objects, object] }));
 
@@ -1071,7 +1071,7 @@ export function App() {
 
       if (objectTool === "select") {
 
-        setSelectedObject(hitObject(level.objects, worldX, worldY));
+        setSelectedObject(hitObject(level.objects, worldX, worldY, modelCatalog));
 
       }
 
@@ -1101,7 +1101,7 @@ export function App() {
 
     update((prev) => {
 
-      const anchor = prev.tiles[anchorIndex];
+      const anchor = findPlacementRef(prev, anchorIndex)?.tile;
 
       if (!anchor) return prev;
 
@@ -1113,7 +1113,7 @@ export function App() {
 
         for (const index of indices) {
 
-          const tile = prev.tiles[index];
+          const tile = findPlacementRef(prev, index)?.tile;
 
           if (tile) snap.set(index, { x: tile.x, y: tile.y });
 
@@ -1139,7 +1139,9 @@ export function App() {
 
 
 
-      const snapshotTiles = prev.tiles.map((tile, i) => {
+      const flat = flattenPlacements(prev);
+
+      const snapshotTiles = flat.map((tile, i) => {
 
         const start = placementDragSnapshotRef.current?.get(i);
 
@@ -1159,7 +1161,7 @@ export function App() {
 
 
 
-      return { ...prev, tiles: snapshotTiles };
+      return movePlacementsByGlobalIndices(prev, indices, deltaX, deltaY);
 
     });
 
@@ -1311,6 +1313,12 @@ export function App() {
 
             onBrushSizeChange={setBrushSize}
 
+            tileLayers={level.tile_layers}
+
+            activeTileLayerId={activeTileLayerId}
+
+            onTileLayerChange={setActiveTileLayerId}
+
           />
 
           <LevelCanvas
@@ -1340,6 +1348,8 @@ export function App() {
             selectedPlacements={selectedPlacements}
 
             backgroundImage={backgroundImage}
+
+            modelCatalog={modelCatalog}
 
             mapRevision={mapRevision}
 
@@ -1420,6 +1430,8 @@ export function App() {
           backgroundAssets={pack.backgrounds}
 
           soundAssets={pack.music}
+
+          modelCatalog={modelCatalog}
 
           snapGrid={snapGrid}
 

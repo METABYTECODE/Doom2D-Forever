@@ -1,9 +1,11 @@
 {
   "format": "rivet-model",
-  "version": 2,
+  "version": 3,
   "id": "player",
   "name": "Player",
   "resource_pack": "dev",
+  "pivot": { "x": 16, "y": 64 },
+  "collider": { "x": 0, "y": 0, "width": 32, "height": 64 },
   "animations": {
     "IDLE": {
       "atlas": "player/barrel",

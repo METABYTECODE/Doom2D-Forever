@@ -1,9 +1,17 @@
 import type { LevelObject } from "../types/level";
+import { objectColliderAabb } from "./object-collider";
+import type { ModelData } from "../types/model";
 
-export function hitObject(objects: LevelObject[], x: number, y: number): number {
+export function hitObject(
+  objects: LevelObject[],
+  x: number,
+  y: number,
+  models: ReadonlyMap<string, ModelData> = new Map(),
+): number {
   for (let i = objects.length - 1; i >= 0; i--) {
     const o = objects[i];
-    if (x >= o.x && x <= o.x + o.width && y >= o.y && y <= o.y + o.height) {
+    const box = objectColliderAabb(o, models);
+    if (x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height) {
       return i;
     }
   }
@@ -49,35 +57,23 @@ export function constrainAxisLineEnd(
     const endX = snap ? snapCoord(x1, gridSize) : x1;
     return { x0: start.x, y0: start.y, x1: endX, y1: start.y };
   }
+
   const endY = snap ? snapCoord(y1, gridSize) : y1;
   return { x0: start.x, y0: start.y, x1: start.x, y1: endY };
 }
 
-/** Marquee for line preview: at least one grid cell thick on the passive axis. */
 export function linePreviewRect(
   x0: number,
   y0: number,
   x1: number,
   y1: number,
   gridSize: number,
-): { x0: number; y0: number; x1: number; y1: number } {
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    const xMin = Math.min(x0, x1);
-    const width = Math.max(gridSize, Math.abs(dx));
-    return { x0: xMin, y0: y0, x1: xMin + width, y1: y0 + gridSize };
-  }
-
-  const yMin = Math.min(y0, y1);
-  const height = Math.max(gridSize, Math.abs(dy));
-  return { x0: x0, y0: yMin, x1: x0 + gridSize, y1: yMin + height };
-}
-
-export function tileAt(worldX: number, worldY: number, tileSize: number) {
-  return {
-    x: Math.floor(worldX / tileSize),
-    y: Math.floor(worldY / tileSize),
-  };
+): { x: number; y: number; w: number; h: number } {
+  const minX = Math.min(x0, x1);
+  const minY = Math.min(y0, y1);
+  const maxX = Math.max(x0, x1);
+  const maxY = Math.max(y0, y1);
+  const w = maxX - minX + gridSize;
+  const h = maxY - minY + gridSize;
+  return { x: minX, y: minY, w, h };
 }

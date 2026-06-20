@@ -1,10 +1,11 @@
+#include <rivet/game/level/level_loader.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <stdexcept>
 
 #include <nlohmann/json.hpp>
 
-#include <rivet/game/level/level_loader.hpp>
 #include <rivet/game/resources/resource_pack.hpp>
 
 namespace rivet::game::level {
@@ -29,6 +30,12 @@ namespace {
     }
     if (json.contains("vy")) {
         object.vel_y = json.at("vy").get<float>();
+    }
+    if (json.contains("z")) {
+        object.z = json.at("z").get<int>();
+    }
+    if (json.contains("model")) {
+        object.model = json.at("model").get<std::string>();
     }
     return object;
 }
@@ -57,6 +64,18 @@ namespace {
     return tile;
 }
 
+[[nodiscard]] TileLayer parse_tile_layer(const nlohmann::json& json) {
+    TileLayer layer;
+    layer.id = json.value("id", "main");
+    layer.z = json.value("z", 0);
+    if (json.contains("tiles")) {
+        for (const auto& tile_json : json.at("tiles")) {
+            layer.tiles.push_back(parse_placed_tile(tile_json));
+        }
+    }
+    return layer;
+}
+
 [[nodiscard]] std::vector<std::vector<int>> empty_collision_grid(const int width, const int height) {
     return std::vector<std::vector<int>>(
         static_cast<std::size_t>(height),
@@ -75,36 +94,9 @@ namespace {
     return std::max(1, (height_px + grid_size - 1) / grid_size);
 }
 
-[[nodiscard]] LevelData load_level_v3(const nlohmann::json& json, const std::filesystem::path& path) {
-    LevelData level;
-    level.name = json.value("name", path.stem().string());
-    level.grid_size = json.value("grid_size", 16);
-    level.width = json.value("width", 0);
-    level.height = json.value("height", 0);
-    level.resource_pack = json.value("resource_pack", resources::kDefaultPackId);
-    level.background = json.value("background", "");
-    level.music = json.value("music", "");
-
-    if (json.contains("tiles")) {
-        for (const auto& tile_json : json.at("tiles")) {
-            level.tiles.push_back(parse_placed_tile(tile_json));
-        }
-    }
-
+void validate_collision_and_fluids(LevelData& level, const std::filesystem::path& path) {
     const int cols = sub_grid_cols(level.width, level.grid_size);
     const int rows = sub_grid_rows(level.height, level.grid_size);
-
-    if (json.contains("collision")) {
-        level.collision = json.at("collision").get<std::vector<std::vector<int>>>();
-    } else {
-        level.collision = empty_collision_grid(cols, rows);
-    }
-
-    if (json.contains("fluids")) {
-        level.fluids = json.at("fluids").get<std::vector<std::vector<int>>>();
-    } else {
-        level.fluids = empty_fluids_grid(cols, rows);
-    }
 
     if (static_cast<int>(level.collision.size()) != rows) {
         throw std::runtime_error("Collision row count does not match level height: " + path.string());
@@ -123,6 +115,53 @@ namespace {
             throw std::runtime_error("Fluids rows have inconsistent width: " + path.string());
         }
     }
+}
+
+[[nodiscard]] LevelData load_level_document(const nlohmann::json& json, const std::filesystem::path& path) {
+    LevelData level;
+    level.name = json.value("name", path.stem().string());
+    level.grid_size = json.value("grid_size", 16);
+    level.width = json.value("width", 0);
+    level.height = json.value("height", 0);
+    level.resource_pack = json.value("resource_pack", resources::kDefaultPackId);
+    level.background = json.value("background", "");
+    level.music = json.value("music", "");
+
+    const int version = json.at("version").get<int>();
+    if (version >= 4 && json.contains("tile_layers")) {
+        for (const auto& layer_json : json.at("tile_layers")) {
+            level.tile_layers.push_back(parse_tile_layer(layer_json));
+        }
+    } else if (json.contains("tiles")) {
+        TileLayer migrated;
+        migrated.id = "main";
+        migrated.z = 0;
+        for (const auto& tile_json : json.at("tiles")) {
+            migrated.tiles.push_back(parse_placed_tile(tile_json));
+        }
+        level.tile_layers.push_back(std::move(migrated));
+    }
+
+    if (level.tile_layers.empty()) {
+        level.tile_layers.push_back(TileLayer{.id = "main", .z = 0});
+    }
+
+    const int cols = sub_grid_cols(level.width, level.grid_size);
+    const int rows = sub_grid_rows(level.height, level.grid_size);
+
+    if (json.contains("collision")) {
+        level.collision = json.at("collision").get<std::vector<std::vector<int>>>();
+    } else {
+        level.collision = empty_collision_grid(cols, rows);
+    }
+
+    if (json.contains("fluids")) {
+        level.fluids = json.at("fluids").get<std::vector<std::vector<int>>>();
+    } else {
+        level.fluids = empty_fluids_grid(cols, rows);
+    }
+
+    validate_collision_and_fluids(level, path);
 
     if (json.contains("objects")) {
         for (const auto& object_json : json.at("objects")) {
@@ -147,13 +186,13 @@ LevelData load_level(const std::filesystem::path& path) {
     }
 
     const int version = json.at("version").get<int>();
-    if (version != LevelData::kVersion) {
+    if (version < 3 || version > LevelData::kVersion) {
         throw std::runtime_error(
             "Unsupported level version " + std::to_string(version) + " in: " + path.string() +
-            " (expected rivet-level v" + std::to_string(LevelData::kVersion) + ")");
+            " (expected rivet-level v3–v" + std::to_string(LevelData::kVersion) + ")");
     }
 
-    return load_level_v3(json, path);
+    return load_level_document(json, path);
 }
 
 } // namespace rivet::game::level

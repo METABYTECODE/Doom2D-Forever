@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { animatedTileFrame } from "../lib/tile-animation";
 import { constrainAxisLineEnd, hitObject, linePreviewRect, snapWorldPoint } from "../lib/geometry";
 import { tileIndexToAtlasCell } from "../lib/tile-math";
-import { findPlacementAtWorld } from "../lib/tile-placements";
+import { findPlacementAtWorldInLevel, findPlacementRef } from "../lib/level-tile-layers";
 import { tileDestRect } from "../lib/tile-render";
 import { normalizeRect } from "../lib/grid-rect";
 import { subGridDimensions, worldToSubCell } from "../lib/sub-grid";
@@ -17,6 +17,14 @@ import {
   type ObjectTool,
 } from "../types/level";
 import type { TilesetDef } from "../types/tileset";
+import type { ModelData } from "../types/model";
+import {
+  colliderAabbFromPivot,
+  modelColliderForObject,
+  objectColliderAabb,
+  playerPlacementPivot,
+} from "../lib/object-collider";
+import { blankModelPlacement } from "../lib/model-space";
 
 interface Props {
   level: LevelData;
@@ -29,6 +37,7 @@ interface Props {
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
   backgroundImage: HTMLImageElement | null;
+  modelCatalog: Map<string, ModelData>;
   selectedObject: number;
   selectedPlacement: number;
   selectedPlacements: ReadonlySet<number>;
@@ -84,6 +93,7 @@ type DrawState = {
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
   backgroundImage: HTMLImageElement | null;
+  modelCatalog: Map<string, ModelData>;
   selectedObject: number;
   selectedPlacement: number;
   selectedPlacements: ReadonlySet<number>;
@@ -110,6 +120,29 @@ function hoverFootprint(
   }
 
   const anchor = snapWorldPoint(worldX, worldY, gridSize, state.snapGrid);
+  if (state.mode === "objects" && state.objectTool === "place-player") {
+    const playerModel = state.modelCatalog.get("player");
+    const pivot = playerPlacementPivot(anchor.x, anchor.y, gridSize);
+    if (playerModel) {
+      const box = colliderAabbFromPivot(pivot.x, pivot.y, playerModel);
+      return { x: box.x, y: box.y, w: box.width, h: box.height };
+    }
+    const blank = blankModelPlacement();
+    const box = colliderAabbFromPivot(pivot.x, pivot.y, {
+      format: "rivet-model",
+      version: 3,
+      id: "player",
+      name: "player",
+      resource_pack: "dev",
+      pivot: blank.pivot,
+      collider: blank.collider,
+      animations: {},
+    });
+    return { x: box.x, y: box.y, w: box.width, h: box.height };
+  }
+  if (state.mode === "objects" && state.objectTool === "place-block") {
+    return { x: anchor.x, y: anchor.y, w: 64, h: 64 };
+  }
   return { x: anchor.x, y: anchor.y, w: gridSize, h: gridSize };
 }
 
@@ -130,6 +163,7 @@ export function LevelCanvas({
   tilesets,
   tilesetImages,
   backgroundImage,
+  modelCatalog,
   selectedObject,
   selectedPlacement,
   selectedPlacements,
@@ -179,6 +213,7 @@ export function LevelCanvas({
     tilesets,
     tilesetImages,
     backgroundImage,
+    modelCatalog,
     selectedObject,
     selectedPlacement,
     selectedPlacements,
@@ -199,6 +234,7 @@ export function LevelCanvas({
     tilesets,
     tilesetImages,
     backgroundImage,
+    modelCatalog,
     selectedObject,
     selectedPlacement,
     selectedPlacements,
@@ -318,7 +354,12 @@ export function LevelCanvas({
       const bounds = toScreen(0, 0);
       ctx.strokeRect(bounds.x, bounds.y, worldW * cam.zoom, worldH * cam.zoom);
 
-      lvl.tiles.forEach((placement, index) => {
+      const sortedLayers = [...lvl.tile_layers].sort((a, b) => a.z - b.z);
+      let globalIndex = 0;
+      for (const layer of sortedLayers) {
+        layer.tiles.forEach((placement) => {
+          const index = globalIndex;
+          globalIndex += 1;
         const frame = animatedTileFrame(placement, elapsedMs);
         const ts = state.tilesets.get(frame.tileset);
         const image = state.tilesetImages.get(frame.tileset);
@@ -359,7 +400,8 @@ export function LevelCanvas({
           ctx.fillStyle = "#fff6a0";
           ctx.fillRect(ap.x - 2, ap.y - 2, 4, 4);
         }
-      });
+        });
+      }
 
       const fluidsActive = state.mode === "fluids";
       for (let gy = 0; gy < rows; gy++) {
@@ -418,9 +460,10 @@ export function LevelCanvas({
       }
 
       lvl.objects.forEach((object, index) => {
-        const p = toScreen(object.x, object.y);
-        const ow = object.width * cam.zoom;
-        const oh = object.height * cam.zoom;
+        const box = objectColliderAabb(object, state.modelCatalog);
+        const p = toScreen(box.x, box.y);
+        const ow = box.width * cam.zoom;
+        const oh = box.height * cam.zoom;
         ctx.fillStyle = OBJECT_COLORS[object.type] ?? "#c8c850";
         ctx.globalAlpha = index === state.selectedObject ? 1 : 0.85;
         ctx.fillRect(p.x, p.y, ow, oh);
@@ -527,7 +570,7 @@ export function LevelCanvas({
         }
 
         if (mode === "objects" && objectTool === "select" && e.button === 0) {
-          const hit = hitObject(level.objects, world.x, world.y);
+          const hit = hitObject(level.objects, world.x, world.y, modelCatalog);
           if (hit >= 0) {
             const object = level.objects[hit];
             dragRef.current = {
@@ -542,9 +585,10 @@ export function LevelCanvas({
         }
 
         if (mode === "tiles" && gridTool === "select" && e.button === 0) {
-          const hit = findPlacementAtWorld(level.tiles, tilesets, world.x, world.y);
+          const hit = findPlacementAtWorldInLevel(level, tilesets, world.x, world.y);
           if (hit >= 0) {
-            const placement = level.tiles[hit];
+            const placement = findPlacementRef(level, hit)?.tile;
+            if (!placement) return;
             if (e.shiftKey) {
               onTilePick(hit, true);
             } else if (!selectedPlacements.has(hit)) {

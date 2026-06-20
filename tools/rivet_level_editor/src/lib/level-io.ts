@@ -2,8 +2,6 @@ import {
   DEFAULT_FRAME_MS,
   DEFAULT_MAP_HEIGHT_PX,
   DEFAULT_MAP_WIDTH_PX,
-  DEFAULT_PLAYER_HEIGHT,
-  DEFAULT_PLAYER_WIDTH,
   GRID_SIZE,
   LEVEL_FORMAT,
   LEVEL_VERSION,
@@ -11,10 +9,12 @@ import {
   type LevelObject,
   type PlacedTile,
   type TileFrame,
+  type TileLayer,
 } from "../types/level";
 import { DEFAULT_PACK_ID } from "./resource-pack";
 import { emptyCollision, paintCollisionBorder } from "./level-collision";
 import { emptyFluids } from "./level-fluids";
+import { DEFAULT_TILE_LAYER_ID, defaultTileLayers, ensureTileLayers, ensureStandardTileLayers } from "./level-tile-layers";
 import { ensureLevelGrids, resizeLevel, setGridSize } from "./level-grids";
 import { subGridCols, subGridRows } from "./sub-grid";
 
@@ -36,7 +36,7 @@ export function createBlankLevel(
     resource_pack: DEFAULT_PACK_ID,
     background: "",
     music: "",
-    tiles: [],
+    tile_layers: defaultTileLayers(),
     collision: emptyCollision(cols, rows),
     fluids: emptyFluids(cols, rows),
     objects: [],
@@ -67,20 +67,87 @@ function parsePlacedTile(raw: Record<string, unknown>): PlacedTile {
   return tile;
 }
 
+function parseTileLayer(raw: Record<string, unknown>): TileLayer {
+  const tiles = Array.isArray(raw.tiles)
+    ? raw.tiles.map((item) => parsePlacedTile(item as Record<string, unknown>))
+    : [];
+  return {
+    id: String(raw.id ?? "main"),
+    z: Number(raw.z ?? 0),
+    tiles,
+  };
+}
+
 function parseObject(raw: Record<string, unknown>, index: number): LevelObject {
   const type = String(raw.type ?? "block");
-  const defaultWidth = type === "player" ? DEFAULT_PLAYER_WIDTH : 48;
-  const defaultHeight = type === "player" ? DEFAULT_PLAYER_HEIGHT : 48;
-  return {
+  const object: LevelObject = {
     id: String(raw.id ?? `object_${index}`),
     type,
     x: Number(raw.x ?? 0),
     y: Number(raw.y ?? 0),
-    width: Number(raw.width ?? defaultWidth),
-    height: Number(raw.height ?? defaultHeight),
     vel_x: Number(raw.vx ?? raw.vel_x ?? 0),
     vel_y: Number(raw.vy ?? raw.vel_y ?? 0),
   };
+  if (type === "player") {
+    const modelId = String(raw.model ?? "player");
+    if (modelId !== "player") {
+      object.model = modelId;
+    }
+  } else if (raw.model != null) {
+    object.model = String(raw.model);
+  }
+  if (type !== "player" && !object.model) {
+    object.width = Number(raw.width ?? 48);
+    object.height = Number(raw.height ?? 48);
+  }
+  if (raw.z != null) {
+    object.z = Number(raw.z);
+  }
+  return object;
+}
+
+function parseTileLayers(raw: Record<string, unknown>, version: number): TileLayer[] {
+  if (version >= 4 && Array.isArray(raw.tile_layers)) {
+    return ensureStandardTileLayers({
+      format: LEVEL_FORMAT,
+      version: LEVEL_VERSION,
+      name: "",
+      grid_size: GRID_SIZE,
+      width: 0,
+      height: 0,
+      resource_pack: DEFAULT_PACK_ID,
+      background: "",
+      music: "",
+      tile_layers: raw.tile_layers.map((layer) => parseTileLayer(layer as Record<string, unknown>)),
+      collision: [],
+      fluids: [],
+      objects: [],
+    }).tile_layers;
+  }
+  if (Array.isArray(raw.tiles)) {
+    return ensureStandardTileLayers({
+      format: LEVEL_FORMAT,
+      version: LEVEL_VERSION,
+      name: "",
+      grid_size: GRID_SIZE,
+      width: 0,
+      height: 0,
+      resource_pack: DEFAULT_PACK_ID,
+      background: "",
+      music: "",
+      tile_layers: [
+        {
+          id: DEFAULT_TILE_LAYER_ID,
+          z: 0,
+          tiles: raw.tiles.map((item) => parsePlacedTile(item as Record<string, unknown>)),
+        },
+      ],
+      collision: [],
+      fluids: [],
+      objects: [],
+    }).tile_layers;
+  }
+  return defaultTileLayers();
 }
 
 export function parseLevelJson(text: string): LevelData {
@@ -90,19 +157,15 @@ export function parseLevelJson(text: string): LevelData {
   }
 
   const version = Number(raw.version);
-  if (version !== LEVEL_VERSION) {
+  if (version < 3 || version > LEVEL_VERSION) {
     throw new Error(
-      `Unsupported rivet-level version ${String(raw.version)} (expected v${LEVEL_VERSION}). Resave the map in the level editor.`,
+      `Unsupported rivet-level version ${String(raw.version)} (expected v3–v${LEVEL_VERSION}). Resave the map in the level editor.`,
     );
   }
 
   const gridSize = Number(raw.grid_size ?? GRID_SIZE);
   const width = Number(raw.width ?? 0);
   const height = Number(raw.height ?? 0);
-
-  const tiles = Array.isArray(raw.tiles)
-    ? raw.tiles.map((item) => parsePlacedTile(item as Record<string, unknown>))
-    : [];
 
   const collision = Array.isArray(raw.collision)
     ? (raw.collision as number[][])
@@ -116,21 +179,23 @@ export function parseLevelJson(text: string): LevelData {
     ? raw.objects.map((item, index) => parseObject(item as Record<string, unknown>, index))
     : [];
 
-  return ensureLevelGrids({
-    format: LEVEL_FORMAT,
-    version: LEVEL_VERSION,
-    name: String(raw.name ?? "level"),
-    grid_size: gridSize,
-    width,
-    height,
-    resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),
-    background: String(raw.background ?? ""),
-    music: String(raw.music ?? ""),
-    tiles,
-    collision,
-    fluids,
-    objects,
-  });
+  return ensureTileLayers(
+    ensureLevelGrids({
+      format: LEVEL_FORMAT,
+      version: LEVEL_VERSION,
+      name: String(raw.name ?? "level"),
+      grid_size: gridSize,
+      width,
+      height,
+      resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),
+      background: String(raw.background ?? ""),
+      music: String(raw.music ?? ""),
+      tile_layers: parseTileLayers(raw, version),
+      collision,
+      fluids,
+      objects,
+    }),
+  );
 }
 
 function objectToJson(object: LevelObject): Record<string, unknown> {
@@ -140,10 +205,18 @@ function objectToJson(object: LevelObject): Record<string, unknown> {
     y: object.y,
   };
   if (object.id) json.id = object.id;
-  if (object.width !== DEFAULT_PLAYER_WIDTH) json.width = object.width;
-  if (object.height !== DEFAULT_PLAYER_HEIGHT) json.height = object.height;
+  if (object.type === "player") {
+    if (object.model && object.model !== "player") {
+      json.model = object.model;
+    }
+  } else {
+    if (object.model) json.model = object.model;
+    if (object.width != null) json.width = object.width;
+    if (object.height != null) json.height = object.height;
+  }
   if (object.vel_x !== 0) json.vx = object.vel_x;
   if (object.vel_y !== 0) json.vy = object.vel_y;
+  if (object.z != null && object.z !== 0) json.z = object.z;
   return json;
 }
 
@@ -161,12 +234,20 @@ function placedTileToJson(tile: PlacedTile): Record<string, unknown> {
   return json;
 }
 
+function tileLayerToJson(layer: TileLayer): Record<string, unknown> {
+  return {
+    id: layer.id,
+    z: layer.z,
+    tiles: layer.tiles.map(placedTileToJson),
+  };
+}
+
 function fluidsGridHasContent(fluids: number[][]): boolean {
   return fluids.some((row) => row.some((cell) => cell !== 0));
 }
 
 export function serializeLevel(level: LevelData): string {
-  const normalized = ensureLevelGrids(level);
+  const normalized = ensureTileLayers(ensureLevelGrids(level));
   const json: Record<string, unknown> = {
     format: LEVEL_FORMAT,
     version: LEVEL_VERSION,
@@ -174,7 +255,7 @@ export function serializeLevel(level: LevelData): string {
     grid_size: normalized.grid_size,
     width: normalized.width,
     height: normalized.height,
-    tiles: normalized.tiles.map(placedTileToJson),
+    tile_layers: normalized.tile_layers.map(tileLayerToJson),
     collision: normalized.collision,
     objects: normalized.objects.map(objectToJson),
   };

@@ -58,7 +58,10 @@ export function resizeLevel(level: LevelData, widthPx: number, heightPx: number)
   const cols = subGridCols(nextWidth, gridSize);
   const rows = subGridRows(nextHeight, gridSize);
 
-  const tiles = level.tiles.filter((tile) => tile.x < nextWidth && tile.y < nextHeight);
+  const tile_layers = level.tile_layers.map((layer) => ({
+    ...layer,
+    tiles: layer.tiles.filter((tile) => tile.x < nextWidth && tile.y < nextHeight),
+  }));
 
   const collision = Array.from({ length: rows }, (_, y) =>
     Array.from({ length: cols }, (_, x) => level.collision[y]?.[x] ?? 0),
@@ -72,7 +75,7 @@ export function resizeLevel(level: LevelData, widthPx: number, heightPx: number)
     ...level,
     width: nextWidth,
     height: nextHeight,
-    tiles,
+    tile_layers,
     collision,
     fluids,
   });

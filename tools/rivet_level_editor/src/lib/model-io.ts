@@ -1,5 +1,12 @@
 import { defaultAnimation } from "./model-atlas";
 import {
+  applyFeetPivotPreset,
+  blankModelPlacement,
+  feetPivot,
+  fullFrameHull,
+  humanoidHull,
+} from "./model-space";
+import {
   DEFAULT_COLUMNS,
   DEFAULT_FRAME_HEIGHT,
   DEFAULT_FRAME_MS,
@@ -7,21 +14,12 @@ import {
   MODEL_FORMAT,
   MODEL_VERSION,
   type ModelAnimation,
+  type ModelCollider,
   type ModelData,
   type ModelFrame,
+  type ModelPivot,
 } from "../types/model";
 import { DEFAULT_PACK_ID } from "./resource-pack";
-
-export function createBlankModel(id = "player"): ModelData {
-  return {
-    format: MODEL_FORMAT,
-    version: MODEL_VERSION,
-    id,
-    name: id,
-    resource_pack: DEFAULT_PACK_ID,
-    animations: {},
-  };
-}
 
 function parseFrame(raw: Record<string, unknown>): ModelFrame {
   return { id: Number(raw.id ?? 0) };
@@ -45,6 +43,103 @@ function parseAnimation(raw: Record<string, unknown>): ModelAnimation {
   };
 }
 
+function parsePivot(raw: Record<string, unknown> | undefined, frameW: number, frameH: number): ModelPivot {
+  if (raw) {
+    return { x: Number(raw.x ?? frameW / 2), y: Number(raw.y ?? frameH) };
+  }
+  return feetPivot(frameW, frameH);
+}
+
+function parseColliderRect(
+  raw: Record<string, unknown>,
+  pivot: ModelPivot,
+  frameW: number,
+  frameH: number,
+): ModelCollider {
+  if ("offset_x" in raw || "offset_y" in raw) {
+    const width = Number(raw.width ?? frameW);
+    const height = Number(raw.height ?? frameH);
+    const offsetX = Number(raw.offset_x ?? -width / 2);
+    const offsetY = Number(raw.offset_y ?? -height);
+    return {
+      x: pivot.x + offsetX,
+      y: pivot.y + offsetY,
+      width,
+      height,
+    };
+  }
+
+  return {
+    x: Number(raw.x ?? 0),
+    y: Number(raw.y ?? 0),
+    width: Number(raw.width ?? frameW),
+    height: Number(raw.height ?? frameH),
+  };
+}
+
+function migrateDeprecatedHitbox(
+  raw: Record<string, unknown>,
+  animations: Record<string, ModelAnimation>,
+): { pivot: ModelPivot; collider: ModelCollider } | null {
+  if (!raw.hitbox || typeof raw.hitbox !== "object") return null;
+  const hb = raw.hitbox as Record<string, unknown>;
+  const idle = animations.IDLE ?? animations.idle ?? Object.values(animations)[0];
+  const frameW = idle?.frame_width ?? DEFAULT_FRAME_WIDTH;
+  const frameH = idle?.frame_height ?? DEFAULT_FRAME_HEIGHT;
+  const pivot = feetPivot(frameW, frameH);
+  const width = Number(hb.width ?? 34);
+  const height = Number(hb.height ?? 52);
+  const originX = Number(hb.origin_x ?? 0);
+  const originY = Number(hb.origin_y ?? 0);
+  return {
+    pivot,
+    collider: { x: originX, y: originY, width, height },
+  };
+}
+
+function inferBody(
+  raw: Record<string, unknown>,
+  animations: Record<string, ModelAnimation>,
+): { pivot: ModelPivot; collider: ModelCollider } {
+  const migratedHitbox = migrateDeprecatedHitbox(raw, animations);
+  if (migratedHitbox) return migratedHitbox;
+
+  const idle = animations.IDLE ?? animations.idle ?? Object.values(animations)[0];
+  const frameW = idle?.frame_width ?? DEFAULT_FRAME_WIDTH;
+  const frameH = idle?.frame_height ?? DEFAULT_FRAME_HEIGHT;
+
+  const pivotRaw =
+    raw.pivot && typeof raw.pivot === "object" ? (raw.pivot as Record<string, unknown>) : undefined;
+  const pivot = parsePivot(pivotRaw, frameW, frameH);
+
+  if (raw.collider && typeof raw.collider === "object") {
+    return {
+      pivot,
+      collider: parseColliderRect(raw.collider as Record<string, unknown>, pivot, frameW, frameH),
+    };
+  }
+
+  if (idle) {
+    return { pivot: feetPivot(frameW, frameH), collider: humanoidHull(frameW, frameH) };
+  }
+
+  return blankModelPlacement();
+}
+
+export function createBlankModel(id = "player"): ModelData {
+  const { pivot, collider } = blankModelPlacement();
+  return {
+    format: MODEL_FORMAT,
+    version: MODEL_VERSION,
+    id,
+    name: id,
+    resource_pack: DEFAULT_PACK_ID,
+    pivot,
+    collider,
+    animations: {},
+  };
+}
+
 export function parseModelJson(text: string): ModelData {
   const raw = JSON.parse(text) as Record<string, unknown>;
   const format = String(raw.format ?? "");
@@ -53,7 +148,7 @@ export function parseModelJson(text: string): ModelData {
   }
 
   const version = Number(raw.version ?? 0);
-  if (version !== 1 && version !== 2) {
+  if (version !== 1 && version !== 2 && version !== 3) {
     throw new Error(`Unsupported model version: ${version}`);
   }
 
@@ -66,12 +161,16 @@ export function parseModelJson(text: string): ModelData {
     }
   }
 
+  const body = inferBody(raw, animations);
+
   return {
     format: MODEL_FORMAT,
     version: MODEL_VERSION,
     id: String(raw.id ?? "model"),
     name: String(raw.name ?? raw.id ?? "model"),
     resource_pack: String(raw.resource_pack ?? DEFAULT_PACK_ID),
+    pivot: body.pivot,
+    collider: body.collider,
     animations,
   };
 }
@@ -98,6 +197,13 @@ export function serializeModel(model: ModelData): string {
     id: model.id,
     name: model.name,
     resource_pack: model.resource_pack,
+    pivot: { x: model.pivot.x, y: model.pivot.y },
+    collider: {
+      x: model.collider.x,
+      y: model.collider.y,
+      width: model.collider.width,
+      height: model.collider.height,
+    },
     animations,
   };
   return JSON.stringify(payload, null, 2);
@@ -113,4 +219,4 @@ export function downloadModel(model: ModelData, filename?: string): void {
   URL.revokeObjectURL(url);
 }
 
-export { defaultAnimation };
+export { defaultAnimation, applyFeetPivotPreset, fullFrameHull };

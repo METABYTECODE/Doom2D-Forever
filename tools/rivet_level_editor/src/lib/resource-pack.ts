@@ -1,4 +1,6 @@
 import type { TilesetDef } from "../types/tileset";
+import type { ModelData } from "../types/model";
+import { parseModelJson } from "./model-io";
 
 export const DEFAULT_PACK_ID = "dev";
 
@@ -56,6 +58,10 @@ const spriteAtlasFiles = import.meta.glob(
   "../resourcepacks/*/textures/sprites/**/*.{png,jpg,jpeg,webp}",
   { eager: true, import: "default" },
 ) as Record<string, string>;
+
+const modelJsonFiles = import.meta.glob("../resourcepacks/*/models/**/*.model.json", {
+  eager: true,
+}) as Record<string, { default: Record<string, unknown> }>;
 
 function normalizePackPath(path: string): string {
   const parts = path.replace(/\\/g, "/").replace(/^(\.\.\/)+/, "").split("/");
@@ -233,6 +239,29 @@ export function listPackIds(): string[] {
     if (id) ids.add(id);
   }
   return [...ids].sort();
+}
+
+export function loadModelCatalog(packId: string = DEFAULT_PACK_ID): Map<string, ModelData> {
+  const map = new Map<string, ModelData>();
+  for (const [path, mod] of Object.entries(modelJsonFiles)) {
+    if (packIdFromPath(path) !== packId) continue;
+    const normalized = normalizePackPath(path);
+    const prefix = `resourcepacks/${packId}/models/`;
+    const idx = normalized.indexOf(prefix);
+    if (idx < 0) continue;
+    const relative = normalized.slice(idx + prefix.length);
+    const modelId = relative.replace(/\.model\.json$/, "").replace(/\\/g, "/");
+    try {
+      const model = parseModelJson(JSON.stringify(mod.default));
+      map.set(modelId, model);
+      if (model.id && model.id !== modelId) {
+        map.set(model.id, model);
+      }
+    } catch (error) {
+      console.warn(`[resourcepack] failed to parse model at ${path}`, error);
+    }
+  }
+  return map;
 }
 
 export function loadResourcePack(packId: string = DEFAULT_PACK_ID): ResourcePackCatalog {

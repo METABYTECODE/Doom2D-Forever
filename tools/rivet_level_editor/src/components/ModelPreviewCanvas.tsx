@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { drawAtlasFrame } from "../lib/atlas-render";
-import type { ModelAnimation } from "../types/model";
+import type { ModelAnimation, ModelCollider, ModelPivot } from "../types/model";
 
 interface Props {
   image: HTMLImageElement | null;
   animation: ModelAnimation | null;
+  pivot: ModelPivot;
+  collider: ModelCollider;
   playing: boolean;
   frameIndex: number;
   onFrameIndexChange?: (index: number) => void;
@@ -13,6 +15,8 @@ interface Props {
 export function ModelPreviewCanvas({
   image,
   animation,
+  pivot,
+  collider,
   playing,
   frameIndex,
   onFrameIndexChange,
@@ -69,7 +73,7 @@ export function ModelPreviewCanvas({
 
     const frameW = animation?.frame_width ?? 64;
     const frameH = animation?.frame_height ?? 64;
-    const pad = 32;
+    const pad = 48;
     const drawW = Math.round(frameW * zoom);
     const drawH = Math.round(frameH * zoom);
 
@@ -107,15 +111,34 @@ export function ModelPreviewCanvas({
       ctx.strokeStyle = "#6ea8ff";
       ctx.lineWidth = 2;
       ctx.strokeRect(originX, originY, drawW, drawH);
-      ctx.fillStyle = "rgba(110,168,255,0.1)";
-      ctx.fillRect(originX, originY, drawW, drawH);
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.06)";
       ctx.fillRect(originX, originY, drawW, drawH);
       ctx.strokeStyle = "rgba(255,255,255,0.2)";
       ctx.strokeRect(originX, originY, drawW, drawH);
     }
-  }, [animation, frameIndex, image, zoom]);
+
+    const pivotScreenX = originX + pivot.x * zoom;
+    const pivotScreenY = originY + pivot.y * zoom;
+    ctx.strokeStyle = "#f0f0a8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(pivotScreenX - 8, pivotScreenY);
+    ctx.lineTo(pivotScreenX + 8, pivotScreenY);
+    ctx.moveTo(pivotScreenX, pivotScreenY - 8);
+    ctx.lineTo(pivotScreenX, pivotScreenY + 8);
+    ctx.stroke();
+
+    const hullX = originX + collider.x * zoom;
+    const hullY = originY + collider.y * zoom;
+    const hullW = collider.width * zoom;
+    const hullH = collider.height * zoom;
+    ctx.strokeStyle = "#ff6a4a";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(hullX, hullY, hullW, hullH);
+    ctx.fillStyle = "rgba(255,106,74,0.15)";
+    ctx.fillRect(hullX, hullY, hullW, hullH);
+  }, [animation, collider, frameIndex, image, pivot, zoom]);
 
   return (
     <div className="model-preview-wrap" ref={wrapRef}>
@@ -128,14 +151,10 @@ export function ModelPreviewCanvas({
           +
         </button>
         <button type="button" onClick={() => setZoom(2)}>
-          Reset
+          1:1
         </button>
       </div>
       <canvas ref={canvasRef} className="model-preview-canvas" />
-      <p className="muted model-preview-hint">
-        Frame {animation?.frame_width ?? "?"}×{animation?.frame_height ?? "?"}px at {zoom.toFixed(1)}×
-        · scroll to zoom view
-      </p>
     </div>
   );
 }

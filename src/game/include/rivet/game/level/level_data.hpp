@@ -12,10 +12,12 @@ struct LevelObject {
     std::string type;
     float x = 0.0f;
     float y = 0.0f;
-    float width = 34.0f;
-    float height = 52.0f;
+    float width = 48.0f;
+    float height = 48.0f;
     float vel_x = 0.0f;
     float vel_y = 0.0f;
+    int z = 0;
+    std::string model;
 };
 
 struct TileFrame {
@@ -31,6 +33,12 @@ struct PlacedTile {
     int y = 0;
     std::vector<TileFrame> frames;
     int frame_ms = 120;
+};
+
+struct TileLayer {
+    std::string id;
+    int z = 0;
+    std::vector<PlacedTile> tiles;
 };
 
 [[nodiscard]] inline bool is_animated_tile(const PlacedTile& tile) {
@@ -54,7 +62,7 @@ struct PlacedTile {
 
 struct LevelData {
     static constexpr const char* kFormatId = "rivet-level";
-    static constexpr int kVersion = 3;
+    static constexpr int kVersion = 4;
 
     std::string name;
     int grid_size = 16;
@@ -63,7 +71,7 @@ struct LevelData {
     std::string resource_pack = "dev";
     std::string background;
     std::string music;
-    std::vector<PlacedTile> tiles;
+    std::vector<TileLayer> tile_layers;
     std::vector<std::vector<int>> collision;
     std::vector<std::vector<int>> fluids;
     std::vector<LevelObject> objects;

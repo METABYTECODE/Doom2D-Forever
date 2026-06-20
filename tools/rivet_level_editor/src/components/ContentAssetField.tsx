@@ -81,7 +81,7 @@ export function ContentAssetField({
 
       {!selected && value && <p className="hint warn">Missing asset id: {value}</p>}
 
-      {assets.length === 0 && <p className="hint">{emptyHint}</p>}
+      {assets.length === 0 && emptyHint ? <p className="inspector-meta">{emptyHint}</p> : null}
 
       {pickerOpen && (
         <div className="modal-backdrop" onPointerDown={() => setPickerOpen(false)}>
