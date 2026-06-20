@@ -1,6 +1,5 @@
-import type { PlacedTile } from "../types/level";
-import type { TilesetDef } from "../types/tileset";
 import { normalizeRect } from "./grid-rect";
+import { cellSpanFootprint } from "./geometry";
 import { rectsOverlap, tileDestRect } from "./tile-render";
 
 export function placementsInRect(
@@ -10,16 +9,25 @@ export function placementsInRect(
   py0: number,
   px1: number,
   py1: number,
+  gridSize?: number,
 ): number[] {
-  const { x0, y0, x1, y1 } = normalizeRect(px0, py0, px1, py1);
-  const selW = x1 - x0;
-  const selH = y1 - y0;
+  const rect = gridSize
+    ? cellSpanFootprint(px0, py0, px1, py1, gridSize)
+    : (() => {
+        const { x0, y0, x1, y1 } = normalizeRect(px0, py0, px1, py1);
+        return {
+          x: x0,
+          y: y0,
+          w: Math.max(x1 - x0, 1),
+          h: Math.max(y1 - y0, 1),
+        };
+      })();
   const hits: number[] = [];
   placements.forEach((placement, index) => {
     const tileset = tilesets.get(placement.tileset);
     if (!tileset) return;
     const dest = tileDestRect(placement.x, placement.y, tileset);
-    if (rectsOverlap(x0, y0, selW, selH, dest.x, dest.y, dest.w, dest.h)) {
+    if (rectsOverlap(rect.x, rect.y, rect.w, rect.h, dest.x, dest.y, dest.w, dest.h)) {
       hits.push(index);
     }
   });

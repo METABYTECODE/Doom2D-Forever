@@ -12,7 +12,6 @@ import type {
 } from "../types/level";
 import { isAnimatedPlacement, placementFrames as getPlacementFrames } from "../lib/tile-animation";
 import { findPlacementRef, tileLayerHint, tileLayerLabel } from "../lib/level-tile-layers";
-import { clampBrushSize } from "../lib/brush";
 import type { TilesetDef } from "../types/tileset";
 import type { ModelData } from "../types/model";
 import { modelColliderForObject, resolveModelId } from "../lib/object-collider";
@@ -147,13 +146,11 @@ interface OptionsBarProps {
   gridTool: GridTool;
   objectTool: ObjectTool;
   fluidPaint: FluidPaint;
-  brushSize: number;
   tileLayers: TileLayer[];
   activeTileLayerId: string;
   onGridToolChange: (tool: GridTool) => void;
   onObjectToolChange: (tool: ObjectTool) => void;
   onFluidPaintChange: (paint: FluidPaint) => void;
-  onBrushSizeChange: (size: number) => void;
   onTileLayerChange: (layerId: string) => void;
 }
 
@@ -162,18 +159,13 @@ export function OptionsBar({
   gridTool,
   objectTool,
   fluidPaint,
-  brushSize,
   tileLayers,
   activeTileLayerId,
   onGridToolChange,
   onObjectToolChange,
   onFluidPaintChange,
-  onBrushSizeChange,
   onTileLayerChange,
 }: OptionsBarProps) {
-  const size = clampBrushSize(brushSize);
-  const showBrushSize =
-    mode === "collision" || mode === "fluids" || (mode === "tiles" && gridTool === "erase");
 
   return (
     <div className="options-bar">
@@ -233,30 +225,6 @@ export function OptionsBar({
               </select>
             </label>
           )}
-        </>
-      )}
-
-      {showBrushSize && (
-        <>
-          <span className="options-sep" />
-          <label className="options-field">
-            <span>Size</span>
-            <input
-              type="range"
-              min={1}
-              max={16}
-              value={size}
-              onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
-            />
-            <input
-              type="number"
-              min={1}
-              max={16}
-              value={size}
-              onChange={(e) => onBrushSizeChange(clampBrushSize(Number(e.target.value)))}
-            />
-          </label>
-          <span className="options-hint">{size}×{size}</span>
         </>
       )}
     </div>
@@ -339,6 +307,7 @@ interface InspectorProps {
   selected: LevelObject | null;
   selectedPlacement: number;
   selectedPlacementCount: number;
+  selectedGridCellCount: number;
   tilesets: Map<string, TilesetDef>;
   tilesetImages: Map<string, HTMLImageElement>;
   backgroundAssets: PackAsset[];
@@ -351,6 +320,8 @@ interface InspectorProps {
   onUpdatePlacement: (index: number, patch: Partial<PlacedTile>) => void;
   onDeleteObject: () => void;
   onDeletePlacement: () => void;
+  onDeleteGridSelection: () => void;
+  onClearGridSelection: () => void;
   onAddFrame: () => void;
   onSnapGridChange: (v: boolean) => void;
   onGridSizeChange: (gridSize: number) => void;
@@ -362,6 +333,7 @@ export function Inspector({
   selected,
   selectedPlacement,
   selectedPlacementCount,
+  selectedGridCellCount,
   tilesets,
   tilesetImages,
   backgroundAssets,
@@ -374,6 +346,8 @@ export function Inspector({
   onUpdatePlacement,
   onDeleteObject,
   onDeletePlacement,
+  onDeleteGridSelection,
+  onClearGridSelection,
   onAddFrame,
   onSnapGridChange,
   onGridSizeChange,
@@ -558,6 +532,19 @@ export function Inspector({
           <button type="button" className="danger-btn" onClick={onDeletePlacement}>
             Delete tile{selectedPlacementCount > 1 ? "s" : ""}
           </button>
+        </section>
+      )}
+
+      {(mode === "collision" || mode === "fluids") && selectedGridCellCount > 0 && (
+        <section className="inspector-section">
+          <h3>{mode === "collision" ? "Collision cells" : "Fluid cells"}</h3>
+          <p className="hint">{selectedGridCellCount} cell(s) selected</p>
+          <div className="field-row">
+            <button type="button" className="danger-btn" onClick={onDeleteGridSelection}>
+              Clear cells
+            </button>
+            <button type="button" onClick={onClearGridSelection}>Deselect</button>
+          </div>
         </section>
       )}
 

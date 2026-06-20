@@ -26,7 +26,7 @@ import { useLevelHistory } from "./hooks/useLevelHistory";
 
 import { constrainAxisLineEnd, hitObject, snapPoint } from "./lib/geometry";
 
-import { strokeBrushCells } from "./lib/brush";
+import { cellsInWorldRect, cellsOnWorldStroke, cellKey, gridCellHasContent, occupiedCellsInWorldRect, translateGridCellValues } from "./lib/grid-tool-cells";
 
 import { gridLineCells, paintCollisionCells } from "./lib/level-collision";
 
@@ -53,7 +53,6 @@ import { applyTilePaintLayers, paintFluidToId } from "./lib/tile-layers";
 import { placementsInRect, canMovePlacements } from "./lib/tile-selection";
 import {
   DEFAULT_TILE_LAYER_ID,
-  findPlacementOnActiveLayerGlobal,
   findPlacementRef,
   flattenPlacements,
   paintTilesOnLayer,
@@ -117,13 +116,13 @@ export function App() {
 
   const [activeTileLayerId, setActiveTileLayerId] = useState(DEFAULT_TILE_LAYER_ID);
 
-  const [gridTool, setGridTool] = useState<GridTool>("select");
+  const [gridTool, setGridToolState] = useState<GridTool>("select");
 
   const [fluidPaint, setFluidPaint] = useState<FluidPaint>("water");
 
   const [objectTool, setObjectTool] = useState<ObjectTool>("select");
 
-  const [brushSize, setBrushSize] = useState(1);
+  const [selectedGridCells, setSelectedGridCells] = useState<Set<string>>(new Set());
 
   const [paintCollision, setPaintCollision] = useState(false);
 
@@ -161,11 +160,40 @@ export function App() {
 
   const [selectedPlacements, setSelectedPlacements] = useState<Set<number>>(new Set());
 
+  const clearTileSelection = useCallback(() => {
+    setSelectedPlacements(new Set());
+    setSelectedPlacement(-1);
+  }, []);
+
+  const clearGridSelection = useCallback(() => {
+    setSelectedGridCells(new Set());
+  }, []);
+
+  const onGridToolChange = useCallback(
+    (tool: GridTool) => {
+      setGridToolState(tool);
+      if (tool !== "select") {
+        clearTileSelection();
+        clearGridSelection();
+      }
+    },
+    [clearGridSelection, clearTileSelection],
+  );
+
+  const onModeChange = useCallback(
+    (nextMode: EditorMode) => {
+      setMode(nextMode);
+      clearTileSelection();
+      clearGridSelection();
+    },
+    [clearGridSelection, clearTileSelection],
+  );
+
   const [snapGrid, setSnapGrid] = useState(true);
 
   const [showJson, setShowJson] = useState(false);
 
-  const [status, setStatus] = useState("Loading…");
+  const [status, setStatus] = useState("New blank level");
 
   const [mapRevision, setMapRevision] = useState(0);
 
@@ -178,6 +206,12 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const placementDragSnapshotRef = useRef<Map<number, { x: number; y: number }> | null>(null);
+
+  const gridDragSnapshotRef = useRef<{
+    keys: Set<string>;
+    collision?: number[][];
+    fluids?: number[][];
+  } | null>(null);
 
 
 
@@ -263,27 +297,9 @@ export function App() {
 
   }, [level.background, pack.backgrounds]);
 
-
-
   useEffect(() => {
-
-    void fetch("/sample.level.json")
-
-      .then((r) => (r.ok ? r.text() : Promise.reject()))
-
-      .then((text) => {
-
-        replace(parseLevelJson(text), true);
-
-        setMapRevision((v) => v + 1);
-
-        setStatus("Loaded sample.level.json");
-
-      })
-
-      .catch(() => setStatus("New blank level"));
-
-  }, [replace]);
+    setSelectedGridCells(new Set());
+  }, [mode]);
 
 
 
@@ -431,106 +447,6 @@ export function App() {
 
 
 
-  useEffect(() => {
-
-    const onKeyDown = (e: KeyboardEvent) => {
-
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-
-
-
-      if (e.ctrlKey && e.key.toLowerCase() === "z") {
-
-        e.preventDefault();
-
-        if (e.shiftKey) redo();
-
-        else undo();
-
-        setStatus(e.shiftKey ? "Redo" : "Undo");
-
-        return;
-
-      }
-
-      if (e.ctrlKey && e.key.toLowerCase() === "s") {
-
-        e.preventDefault();
-
-        exportLevel();
-
-        return;
-
-      }
-
-      if (e.key === "Delete") {
-
-        if (mode === "tiles" && (selectedPlacements.size > 0 || selectedPlacement >= 0)) {
-
-          deleteSelectedPlacement();
-
-        } else if (selectedObject >= 0) deleteSelectedObject();
-
-        return;
-
-      }
-
-      if (e.ctrlKey && e.key.toLowerCase() === "a" && mode === "tiles") {
-
-        e.preventDefault();
-
-        const all = new Set(buildPlacementRefs(level).map((ref) => ref.globalIndex));
-
-        setSelectedPlacements(all);
-
-        setSelectedPlacement(tileCount(level) > 0 ? 0 : -1);
-
-        setStatus(`Selected ${all.size} tile(s)`);
-
-        return;
-
-      }
-
-      if (e.key === "t") setMode("tiles");
-
-      if (e.key === "c") setMode("collision");
-
-      if (e.key === "f") setMode("fluids");
-
-      if (e.key === "o") setMode("objects");
-
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-
-    return () => window.removeEventListener("keydown", onKeyDown);
-
-  }, [
-
-    deleteSelectedObject,
-
-    deleteSelectedPlacement,
-
-    exportLevel,
-
-    level.tile_layers,
-
-    mode,
-
-    redo,
-
-    selectedObject,
-
-    selectedPlacement,
-
-    selectedPlacements.size,
-
-    undo,
-
-  ]);
-
-
-
   const selected = useMemo(
 
     () => (selectedObject >= 0 ? level.objects[selectedObject] : null),
@@ -585,7 +501,9 @@ export function App() {
 
   const onMarqueeSelect = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
 
-    const hits = placementsInRectInLevel(level, tilesets, x0, y0, x1, y1);
+    const { gridSize } = subGridDimensions(level);
+
+    const hits = placementsInRectInLevel(level, tilesets, x0, y0, x1, y1, gridSize);
 
     if (additive) {
 
@@ -602,6 +520,142 @@ export function App() {
     }
 
     setStatus(`Selected ${hits.length} tile(s)`);
+
+  };
+
+
+
+  const onRectSelect = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
+
+    if (mode === "tiles") {
+
+      onMarqueeSelect(x0, y0, x1, y1, additive);
+
+      return;
+
+    }
+
+    const { gridSize, cols, rows } = subGridDimensions(level);
+
+    const cells = occupiedCellsInWorldRect(level, mode, x0, y0, x1, y1, gridSize, cols, rows);
+
+    if (cells.length === 0) {
+
+      if (!additive) setSelectedGridCells(new Set());
+
+      setStatus(mode === "collision" ? "No collision in area" : "No fluid in area");
+
+      return;
+
+    }
+
+    const next = additive ? new Set(selectedGridCells) : new Set<string>();
+
+    for (const cell of cells) next.add(cellKey(cell.x, cell.y));
+
+    setSelectedGridCells(next);
+
+    setStatus(`Selected ${next.size} cell(s)`);
+
+  };
+
+
+
+  const onRectErase = (x0: number, y0: number, x1: number, y1: number) => {
+
+    const { gridSize, cols, rows } = subGridDimensions(level);
+
+    if (mode === "tiles") {
+
+      const hits = placementsInRectInLevel(level, tilesets, x0, y0, x1, y1, gridSize);
+
+      if (hits.length === 0) {
+
+        setStatus("No tiles in area");
+
+        return;
+
+      }
+
+      beginStroke();
+
+      update((prev) => removePlacementsByGlobalIndices(prev, new Set(hits)));
+
+      endStroke();
+
+      clearTileSelection();
+
+      setStatus(`Erased ${hits.length} tile(s)`);
+
+      return;
+
+    }
+
+    const cells = cellsInWorldRect(x0, y0, x1, y1, gridSize, cols, rows);
+
+    if (cells.length === 0) {
+
+      setStatus("No cells in area");
+
+      return;
+
+    }
+
+    beginStroke();
+
+    if (mode === "collision") {
+
+      applyCollisionCells(cells, 0);
+
+      setStatus(`Erased ${cells.length} collision cell(s)`);
+
+    } else if (mode === "fluids") {
+
+      applyFluidCells(cells, FLUID_NONE);
+
+      setStatus(`Erased ${cells.length} fluid cell(s)`);
+
+    }
+
+    endStroke();
+
+    clearGridSelection();
+
+  };
+
+
+
+  const onGridCellPick = (cellX: number, cellY: number, additive: boolean) => {
+
+    if (!gridCellHasContent(level, mode, cellX, cellY)) {
+
+      if (!additive) setSelectedGridCells(new Set());
+
+      return;
+
+    }
+
+    const key = cellKey(cellX, cellY);
+
+    if (additive) {
+
+      const next = new Set(selectedGridCells);
+
+      if (next.has(key)) next.delete(key);
+
+      else next.add(key);
+
+      setSelectedGridCells(next);
+
+      setStatus(`Grid selection: ${next.size} cell(s)`);
+
+      return;
+
+    }
+
+    setSelectedGridCells(new Set([key]));
+
+    setStatus("Selected 1 cell");
 
   };
 
@@ -705,46 +759,6 @@ export function App() {
 
 
 
-  const eraseTilesAtWorld = (worldX: number, worldY: number) => {
-
-    update((prev) => {
-
-      const hit = findPlacementOnActiveLayerGlobal(prev, activeTileLayerId, tilesets, worldX, worldY);
-
-      if (hit < 0) return prev;
-
-      const next = removePlacementsByGlobalIndices(prev, new Set([hit]));
-
-      if (selectedPlacement === hit) {
-
-        setSelectedPlacement(-1);
-
-        setSelectedPlacements(new Set());
-
-      }
-
-      setSelectedPlacements((current) => {
-
-        const nextSelection = new Set<number>();
-
-        for (const index of current) {
-
-          if (index !== hit) nextSelection.add(index);
-
-        }
-
-        return nextSelection;
-
-      });
-
-      return next;
-
-    });
-
-  };
-
-
-
   const applyCollisionCells = (
 
     cells: Array<{ x: number; y: number }>,
@@ -787,6 +801,158 @@ export function App() {
 
 
 
+  const deleteSelectedGridCells = useCallback(() => {
+
+    if (selectedGridCells.size === 0) return;
+
+    const cells = [...selectedGridCells]
+
+      .map((key) => {
+
+        const [xs, ys] = key.split(",");
+
+        return { x: Number(xs), y: Number(ys) };
+
+      })
+
+      .filter((cell) => Number.isFinite(cell.x) && Number.isFinite(cell.y));
+
+    if (cells.length === 0) return;
+
+    beginStroke();
+
+    if (mode === "collision") {
+
+      applyCollisionCells(cells, 0);
+
+      setStatus(`Cleared ${cells.length} collision cell(s)`);
+
+    } else if (mode === "fluids") {
+
+      applyFluidCells(cells, FLUID_NONE);
+
+      setStatus(`Cleared ${cells.length} fluid cell(s)`);
+
+    }
+
+    endStroke();
+
+    setSelectedGridCells(new Set());
+
+  }, [mode, selectedGridCells, beginStroke, endStroke]);
+
+
+
+  useEffect(() => {
+
+    const onKeyDown = (e: KeyboardEvent) => {
+
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+
+
+      if (e.ctrlKey && e.key.toLowerCase() === "z") {
+
+        e.preventDefault();
+
+        if (e.shiftKey) redo();
+
+        else undo();
+
+        setStatus(e.shiftKey ? "Redo" : "Undo");
+
+        return;
+
+      }
+
+      if (e.ctrlKey && e.key.toLowerCase() === "s") {
+
+        e.preventDefault();
+
+        exportLevel();
+
+        return;
+
+      }
+
+      if (e.key === "Delete") {
+
+        if (mode === "tiles" && (selectedPlacements.size > 0 || selectedPlacement >= 0)) {
+
+          deleteSelectedPlacement();
+
+        } else if ((mode === "collision" || mode === "fluids") && selectedGridCells.size > 0) {
+
+          deleteSelectedGridCells();
+
+        } else if (selectedObject >= 0) deleteSelectedObject();
+
+        return;
+
+      }
+
+      if (e.ctrlKey && e.key.toLowerCase() === "a" && mode === "tiles") {
+
+        e.preventDefault();
+
+        const all = new Set(buildPlacementRefs(level).map((ref) => ref.globalIndex));
+
+        setSelectedPlacements(all);
+
+        setSelectedPlacement(tileCount(level) > 0 ? 0 : -1);
+
+        setStatus(`Selected ${all.size} tile(s)`);
+
+        return;
+
+      }
+
+      if (e.key === "t") onModeChange("tiles");
+
+      if (e.key === "c") onModeChange("collision");
+
+      if (e.key === "f") onModeChange("fluids");
+
+      if (e.key === "o") onModeChange("objects");
+
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => window.removeEventListener("keydown", onKeyDown);
+
+  }, [
+
+    deleteSelectedGridCells,
+
+    deleteSelectedObject,
+
+    deleteSelectedPlacement,
+
+    exportLevel,
+
+    level.tile_layers,
+
+    mode,
+
+    onModeChange,
+
+    redo,
+
+    selectedGridCells.size,
+
+    selectedObject,
+
+    selectedPlacement,
+
+    selectedPlacements.size,
+
+    undo,
+
+  ]);
+
+
+
   const snapTileAnchors = (positions: Array<{ x: number; y: number }>) => {
     if (!snapGrid) return positions;
     return positions.map((p) => placeAt(p.x, p.y));
@@ -817,13 +983,7 @@ export function App() {
 
       const value = gridTool === "erase" ? 0 : 1;
 
-      const expanded = cells.flatMap((cell) =>
-
-        strokeBrushCells(undefined, cell.x, cell.y, brushSize, cols, rows),
-
-      );
-
-      applyCollisionCells(expanded, value);
+      applyCollisionCells(cells, value);
 
       return;
 
@@ -833,13 +993,7 @@ export function App() {
 
       const value = gridTool === "erase" ? FLUID_NONE : paintFluidToId(fluidPaint);
 
-      const expanded = cells.flatMap((cell) =>
-
-        strokeBrushCells(undefined, cell.x, cell.y, brushSize, cols, rows),
-
-      );
-
-      applyFluidCells(expanded, value);
+      applyFluidCells(cells, value);
 
     }
 
@@ -856,7 +1010,8 @@ export function App() {
 
       if (gridTool === "erase") {
         update((prev) => {
-          const hits = placementsInRectInLevel(prev, tilesets, p0.x, p0.y, p1.x, p1.y);
+          const { gridSize } = subGridDimensions(prev);
+          const hits = placementsInRectInLevel(prev, tilesets, p0.x, p0.y, p1.x, p1.y, gridSize);
           if (hits.length === 0) return prev;
           return removePlacementsByGlobalIndices(prev, new Set(hits));
         });
@@ -915,22 +1070,17 @@ export function App() {
 
     if (mode === "collision") {
 
+      if (gridTool === "select" || gridTool === "erase") return;
+
       if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return;
 
-      const value = gridTool === "erase" ? 0 : 1;
+      const value = 1;
 
-      const cells = strokeBrushCells(
-        strokeFrom ? worldToSubCell(strokeFrom.x, strokeFrom.y, gridSize) : undefined,
-        cx,
-        cy,
+      const cells = strokeFrom
 
-        brushSize,
+        ? cellsOnWorldStroke(strokeFrom.x, strokeFrom.y, worldX, worldY, gridSize)
 
-        cols,
-
-        rows,
-
-      );
+        : [{ x: cx, y: cy }];
 
       applyCollisionCells(cells, value);
 
@@ -942,22 +1092,17 @@ export function App() {
 
     if (mode === "fluids") {
 
+      if (gridTool === "select" || gridTool === "erase") return;
+
       if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return;
 
-      const value = gridTool === "erase" ? FLUID_NONE : paintFluidToId(fluidPaint);
+      const value = paintFluidToId(fluidPaint);
 
-      const cells = strokeBrushCells(
-        strokeFrom ? worldToSubCell(strokeFrom.x, strokeFrom.y, gridSize) : undefined,
-        cx,
-        cy,
+      const cells = strokeFrom
 
-        brushSize,
+        ? cellsOnWorldStroke(strokeFrom.x, strokeFrom.y, worldX, worldY, gridSize)
 
-        cols,
-
-        rows,
-
-      );
+        : [{ x: cx, y: cy }];
 
       applyFluidCells(cells, value);
 
@@ -974,20 +1119,6 @@ export function App() {
           ? snapTileAnchors(pixelLinePositions(strokeFrom.x, strokeFrom.y, worldX, worldY, step))
           : [placeAt(worldX, worldY)];
         paintTilesAtPositions(positions);
-        return;
-      }
-
-      if (gridTool === "erase" && button === 0) {
-        const pos = placeAt(worldX, worldY);
-        if (strokeFrom) {
-          const step = snapGrid ? gridSize : 8;
-          const points = snapTileAnchors(
-            pixelLinePositions(strokeFrom.x, strokeFrom.y, worldX, worldY, step),
-          );
-          for (const p of points) eraseTilesAtWorld(p.x, p.y);
-        } else {
-          eraseTilesAtWorld(pos.x, pos.y);
-        }
         return;
       }
     }
@@ -1175,6 +1306,49 @@ export function App() {
     placementDragSnapshotRef.current = null;
   };
 
+  const onGridCellsDrag = (deltaX: number, deltaY: number) => {
+    if ((deltaX === 0 && deltaY === 0) || selectedGridCells.size === 0) return;
+
+    if (!gridDragSnapshotRef.current) {
+      gridDragSnapshotRef.current = {
+        keys: new Set(selectedGridCells),
+        collision:
+          mode === "collision" ? level.collision.map((row) => [...row]) : undefined,
+        fluids: mode === "fluids" ? level.fluids.map((row) => [...row]) : undefined,
+      };
+    }
+
+    const snap = gridDragSnapshotRef.current;
+    const { cols, rows } = subGridDimensions(level);
+    const emptyValue = mode === "collision" ? 0 : FLUID_NONE;
+    const baseGrid =
+      mode === "collision" ? snap.collision! : mode === "fluids" ? snap.fluids! : null;
+    if (!baseGrid) return;
+
+    const moved = translateGridCellValues(
+      baseGrid,
+      snap.keys,
+      deltaX,
+      deltaY,
+      cols,
+      rows,
+      emptyValue,
+    );
+    if (!moved) return;
+
+    setSelectedGridCells(moved.movedKeys);
+    update((prev) => {
+      if (mode === "collision") {
+        return { ...prev, collision: moved.grid };
+      }
+      return { ...prev, fluids: moved.grid };
+    });
+  };
+
+  const onGridCellsDragEnd = () => {
+    gridDragSnapshotRef.current = null;
+  };
+
   const loadFile = async (file: File) => {
 
     try {
@@ -1188,6 +1362,8 @@ export function App() {
       setSelectedPlacement(-1);
 
       setSelectedPlacements(new Set());
+
+      setSelectedGridCells(new Set());
 
       setMapRevision((v) => v + 1);
 
@@ -1275,6 +1451,8 @@ export function App() {
 
           setSelectedPlacements(new Set());
 
+          setSelectedGridCells(new Set());
+
           setMapRevision((v) => v + 1);
 
           setStatus("New blank level");
@@ -1291,7 +1469,7 @@ export function App() {
 
       <div className={`editor-main ${showJson ? "with-json" : ""}`}>
 
-        <ToolRail mode={mode} onModeChange={setMode} />
+        <ToolRail mode={mode} onModeChange={onModeChange} />
 
 
 
@@ -1307,15 +1485,11 @@ export function App() {
 
             fluidPaint={fluidPaint}
 
-            brushSize={brushSize}
-
-            onGridToolChange={setGridTool}
+            onGridToolChange={onGridToolChange}
 
             onObjectToolChange={setObjectTool}
 
             onFluidPaintChange={setFluidPaint}
-
-            onBrushSizeChange={setBrushSize}
 
             tileLayers={level.tile_layers}
 
@@ -1335,8 +1509,6 @@ export function App() {
 
             objectTool={objectTool}
 
-            brushSize={brushSize}
-
             snapGrid={snapGrid}
 
             activeTilesetId={activeTilesetId}
@@ -1350,6 +1522,8 @@ export function App() {
             selectedPlacement={selectedPlacement}
 
             selectedPlacements={selectedPlacements}
+
+            selectedGridCells={selectedGridCells}
 
             backgroundImage={backgroundImage}
 
@@ -1369,7 +1543,17 @@ export function App() {
 
             onPlacementsDragEnd={onPlacementsDragEnd}
 
-            onMarqueeSelect={onMarqueeSelect}
+            onGridCellsDrag={onGridCellsDrag}
+
+            onGridCellsDragEnd={onGridCellsDragEnd}
+
+            onClearGridSelection={clearGridSelection}
+
+            onGridCellPick={onGridCellPick}
+
+            onRectSelect={onRectSelect}
+
+            onRectErase={onRectErase}
 
             onLineTool={onLineTool}
 
@@ -1427,6 +1611,8 @@ export function App() {
 
           }
 
+          selectedGridCellCount={selectedGridCells.size}
+
           tilesets={tilesets}
 
           tilesetImages={tilesetImages}
@@ -1450,6 +1636,10 @@ export function App() {
           onDeleteObject={deleteSelectedObject}
 
           onDeletePlacement={deleteSelectedPlacement}
+
+          onDeleteGridSelection={deleteSelectedGridCells}
+
+          onClearGridSelection={clearGridSelection}
 
           onAddFrame={openFramePicker}
 

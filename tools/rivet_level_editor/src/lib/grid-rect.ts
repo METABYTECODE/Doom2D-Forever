@@ -1,3 +1,5 @@
+import { worldToSubCell } from "./sub-grid";
+
 export function normalizeRect(
   x0: number,
   y0: number,
@@ -23,10 +25,12 @@ export function rectSubCells(
   rows: number,
 ): Array<{ x: number; y: number }> {
   const { x0, y0, x1, y1 } = normalizeRect(px0, py0, px1, py1);
-  const gx0 = Math.floor(x0 / gridSize);
-  const gy0 = Math.floor(y0 / gridSize);
-  const gx1 = Math.floor((x1 - 1) / gridSize);
-  const gy1 = Math.floor((y1 - 1) / gridSize);
+  const c0 = worldToSubCell(x0, y0, gridSize);
+  const c1 = worldToSubCell(x1, y1, gridSize);
+  const gx0 = Math.min(c0.x, c1.x);
+  const gy0 = Math.min(c0.y, c1.y);
+  const gx1 = Math.max(c0.x, c1.x);
+  const gy1 = Math.max(c0.y, c1.y);
   const cells: Array<{ x: number; y: number }> = [];
   for (let y = gy0; y <= gy1; y++) {
     for (let x = gx0; x <= gx1; x++) {

@@ -128,11 +128,12 @@ export function placementsInRectInLevel(
   y0: number,
   x1: number,
   y1: number,
+  gridSize?: number,
 ): number[] {
   const refs = buildPlacementRefs(level);
   const hits: number[] = [];
   for (const ref of refs) {
-    const localHits = placementsInRect([ref.tile], tilesets, x0, y0, x1, y1);
+    const localHits = placementsInRect([ref.tile], tilesets, x0, y0, x1, y1, gridSize);
     if (localHits.length > 0) {
       hits.push(ref.globalIndex);
     }
