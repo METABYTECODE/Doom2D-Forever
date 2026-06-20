@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { animatedTileFrame } from "../lib/tile-animation";
-import { constrainAxisLineEnd, hitObject, linePreviewRect, snapWorldPoint } from "../lib/geometry";
+import { constrainAxisLineEnd, cellSpanFootprint, hitObject, previewCellsForFill, previewCellsForLine, snapWorldPoint } from "../lib/geometry";
 import { tileIndexToAtlasCell } from "../lib/tile-math";
 import { findPlacementAtWorldInLevel, findPlacementRef } from "../lib/level-tile-layers";
+import { pixelAxisLinePositions, pixelFillPositions } from "../lib/tile-pixel-tools";
 import { tileDestRect } from "../lib/tile-render";
-import { normalizeRect } from "../lib/grid-rect";
 import { subGridDimensions, worldToSubCell } from "../lib/sub-grid";
-import { GRID_SIZE } from "../types/level";
 import {
   FLUID_ACID,
   FLUID_LAVA,
@@ -124,7 +123,8 @@ function hoverFootprint(
   if (
     state.mode === "tiles" &&
     state.activeTilesetId &&
-    (state.gridTool === "paint" || state.gridTool === "erase")
+    state.gridTool !== "line" &&
+    state.gridTool !== "fill"
   ) {
     const tileset = state.tilesets.get(state.activeTilesetId);
     if (tileset) {
@@ -171,6 +171,195 @@ function hoverFillColor(mode: EditorMode): string {
   return "rgba(110,168,255,0.16)";
 }
 
+function drawFluidOverlay(
+  ctx: CanvasRenderingContext2D,
+  lvl: LevelData,
+  mode: EditorMode,
+  gridSize: number,
+  cols: number,
+  rows: number,
+  gridScreen: number,
+  toScreen: (wx: number, wy: number) => { x: number; y: number },
+) {
+  const fluidsActive = mode === "fluids";
+  for (let gy = 0; gy < rows; gy++) {
+    for (let gx = 0; gx < cols; gx++) {
+      const fluid = lvl.fluids[gy]?.[gx] ?? 0;
+      if (fluid === 0) continue;
+      const p = toScreen(gx * gridSize, gy * gridSize);
+      ctx.fillStyle = FLUID_FILL[fluid] ?? "rgba(120,120,255,0.4)";
+      ctx.fillRect(p.x, p.y, gridScreen, gridScreen);
+      ctx.strokeStyle = fluidsActive
+        ? (FLUID_STROKE[fluid] ?? "rgba(180,180,255,0.8)")
+        : (FLUID_STROKE[fluid] ?? "rgba(140,140,200,0.45)");
+      ctx.lineWidth = fluidsActive ? 2 : 1;
+      ctx.strokeRect(p.x + 0.5, p.y + 0.5, gridScreen - 1, gridScreen - 1);
+    }
+  }
+}
+
+function drawCollisionOverlay(
+  ctx: CanvasRenderingContext2D,
+  lvl: LevelData,
+  mode: EditorMode,
+  gridSize: number,
+  cols: number,
+  rows: number,
+  gridScreen: number,
+  toScreen: (wx: number, wy: number) => { x: number; y: number },
+) {
+  const collisionFill =
+    mode === "collision" ? "rgba(255, 50, 50, 0.62)" : "rgba(255, 70, 70, 0.38)";
+  const collisionStroke =
+    mode === "collision" ? "rgba(255, 220, 120, 0.95)" : "rgba(255, 180, 100, 0.6)";
+
+  for (let gy = 0; gy < rows; gy++) {
+    for (let gx = 0; gx < cols; gx++) {
+      if ((lvl.collision[gy]?.[gx] ?? 0) === 0) continue;
+      const p = toScreen(gx * gridSize, gy * gridSize);
+      ctx.fillStyle = collisionFill;
+      ctx.fillRect(p.x, p.y, gridScreen, gridScreen);
+      ctx.strokeStyle = collisionStroke;
+      ctx.lineWidth = mode === "collision" ? 2 : 1;
+      ctx.strokeRect(p.x + 0.5, p.y + 0.5, gridScreen - 1, gridScreen - 1);
+    }
+  }
+}
+
+function drawPreviewFootprints(
+  ctx: CanvasRenderingContext2D,
+  footprints: HoverRect[],
+  cam: { zoom: number },
+  toScreen: (wx: number, wy: number) => { x: number; y: number },
+  fillStyle: string,
+  strokeStyle: string,
+) {
+  for (const fp of footprints) {
+    const p = toScreen(fp.x, fp.y);
+    const w = fp.w * cam.zoom;
+    const h = fp.h * cam.zoom;
+    ctx.fillStyle = fillStyle;
+    ctx.fillRect(p.x, p.y, w, h);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x, p.y, w, h);
+  }
+}
+
+function computeLinePreview(
+  mode: EditorMode,
+  state: DrawState,
+  lvl: LevelData,
+  locked: MarqueeRect,
+  snap: boolean,
+): { cells: Array<{ x: number; y: number }> | null; footprints: HoverRect[] | null } {
+  const { gridSize } = subGridDimensions(lvl);
+  if (mode === "tiles" && state.activeTilesetId) {
+    const ts = state.tilesets.get(state.activeTilesetId);
+    const tw = ts?.tile_width ?? gridSize;
+    const positions = pixelAxisLinePositions(locked.x0, locked.y0, locked.x1, locked.y1, tw);
+    return {
+      cells: null,
+      footprints: positions.map((p) =>
+        ts
+          ? tileDestRect(p.x, p.y, ts)
+          : { x: p.x, y: p.y, w: gridSize, h: gridSize },
+      ),
+    };
+  }
+  return {
+    cells: previewCellsForLine(locked.x0, locked.y0, locked.x1, locked.y1, gridSize, snap),
+    footprints: null,
+  };
+}
+
+function computeFillPreview(
+  mode: EditorMode,
+  state: DrawState,
+  lvl: LevelData,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+): { cells: Array<{ x: number; y: number }> | null; footprints: HoverRect[] | null } {
+  const { gridSize, cols, rows } = subGridDimensions(lvl);
+  if (mode === "tiles" && state.activeTilesetId) {
+    const ts = state.tilesets.get(state.activeTilesetId);
+    const tw = ts?.tile_width ?? gridSize;
+    const th = ts?.tile_height ?? gridSize;
+    const positions = pixelFillPositions(x0, y0, x1, y1, tw, th);
+    return {
+      cells: null,
+      footprints: positions.map((p) =>
+        ts
+          ? tileDestRect(p.x, p.y, ts)
+          : { x: p.x, y: p.y, w: gridSize, h: gridSize },
+      ),
+    };
+  }
+  return {
+    cells: previewCellsForFill(x0, y0, x1, y1, gridSize, cols, rows),
+    footprints: null,
+  };
+}
+
+function drawPreviewCells(
+  ctx: CanvasRenderingContext2D,
+  cells: Array<{ x: number; y: number }>,
+  gridSize: number,
+  gridScreen: number,
+  toScreen: (wx: number, wy: number) => { x: number; y: number },
+  fillStyle: string,
+  strokeStyle: string,
+) {
+  for (const cell of cells) {
+    const p = toScreen(cell.x * gridSize, cell.y * gridSize);
+    ctx.fillStyle = fillStyle;
+    ctx.fillRect(p.x, p.y, gridScreen, gridScreen);
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x + 0.5, p.y + 0.5, gridScreen - 1, gridScreen - 1);
+  }
+}
+
+function drawSelectedPlacements(
+  ctx: CanvasRenderingContext2D,
+  state: DrawState,
+  lvl: LevelData,
+  gridSize: number,
+  cam: { zoom: number },
+  elapsedMs: number,
+  toScreen: (wx: number, wy: number) => { x: number; y: number },
+) {
+  const sortedLayers = [...lvl.tile_layers].sort((a, b) => a.z - b.z);
+  let globalIndex = 0;
+  for (const layer of sortedLayers) {
+    for (const placement of layer.tiles) {
+      const index = globalIndex;
+      globalIndex += 1;
+      const selected =
+        state.selectedPlacements.has(index) || index === state.selectedPlacement;
+      if (!selected) continue;
+
+      const frame = animatedTileFrame(placement, elapsedMs);
+      const footprintTs = state.tilesets.get(placement.tileset);
+      const dest = footprintTs
+        ? tileDestRect(placement.x, placement.y, footprintTs)
+        : { x: placement.x, y: placement.y, w: gridSize, h: gridSize };
+      const p = toScreen(dest.x, dest.y);
+      const pw = dest.w * cam.zoom;
+      const ph = dest.h * cam.zoom;
+
+      ctx.strokeStyle = "#fff6a0";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(p.x, p.y, pw, ph);
+      const ap = toScreen(placement.x, placement.y);
+      ctx.fillStyle = "#fff6a0";
+      ctx.fillRect(ap.x - 2, ap.y - 2, 4, 4);
+    }
+  }
+}
+
 export function LevelCanvas({
   level,
   mode,
@@ -209,15 +398,33 @@ export function LevelCanvas({
   const panRef = useRef({ active: false, sx: 0, sy: 0, cx: 0, cy: 0 });
   const dragRef = useRef<
     | { kind: "object"; index: number; offsetX: number; offsetY: number }
-    | { kind: "placements"; indices: number[]; anchorIndex: number; offsetX: number; offsetY: number }
+    | {
+        kind: "placements";
+        indices: number[];
+        anchorIndex: number;
+        grabSnappedX: number;
+        grabSnappedY: number;
+        anchorStartX: number;
+        anchorStartY: number;
+      }
     | null
   >(null);
   const marqueeRef = useRef<MarqueeRect | null>(null);
   const lineRef = useRef<MarqueeRect | null>(null);
   const fillRef = useRef<MarqueeRect | null>(null);
+  const previewCellsRef = useRef<Array<{ x: number; y: number }> | null>(null);
+  const previewFootprintsRef = useRef<HoverRect[] | null>(null);
   const hoverRef = useRef<HoverRect | null>(null);
   const animationStartRef = useRef(performance.now());
   const cameraRef = useRef(camera);
+  const levelRef = useRef(level);
+  const pendingPlacementDragRef = useRef<{
+    indices: number[];
+    anchorIndex: number;
+    worldX: number;
+    worldY: number;
+  } | null>(null);
+  const placementDragRafRef = useRef(0);
   const drawStateRef = useRef<DrawState>({
     camera,
     hover: null,
@@ -238,8 +445,21 @@ export function LevelCanvas({
     selectedPlacements,
   });
 
+  const applyLinePreview = (locked: MarqueeRect) => {
+    const preview = computeLinePreview(mode, drawStateRef.current, levelRef.current, locked, snapGrid);
+    previewCellsRef.current = preview.cells;
+    previewFootprintsRef.current = preview.footprints;
+  };
+
+  const applyFillPreview = (x0: number, y0: number, x1: number, y1: number) => {
+    const preview = computeFillPreview(mode, drawStateRef.current, levelRef.current, x0, y0, x1, y1);
+    previewCellsRef.current = preview.cells;
+    previewFootprintsRef.current = preview.footprints;
+  };
+
   cameraRef.current = camera;
-  drawStateRef.current = {
+  levelRef.current = level;
+  Object.assign(drawStateRef.current, {
     camera,
     hover: hoverRef.current,
     marquee: marqueeRef.current ?? lineRef.current ?? fillRef.current,
@@ -257,7 +477,7 @@ export function LevelCanvas({
     selectedObject,
     selectedPlacement,
     selectedPlacements,
-  };
+  });
 
   useEffect(() => {
     setCamera({
@@ -325,8 +545,13 @@ export function LevelCanvas({
     let frame = 0;
     const draw = () => {
       const state = drawStateRef.current;
-      const { camera: cam, hover, marquee, level: lvl } = state;
-      const { gridSize, cols, rows } = subGridDimensions(lvl);
+      const cam = cameraRef.current;
+      const lvl = levelRef.current;
+      const hover = hoverRef.current;
+      const marquee = marqueeRef.current ?? lineRef.current ?? fillRef.current;
+      const previewCells = previewCellsRef.current;
+      const previewFootprints = previewFootprintsRef.current;
+      const { gridSize } = subGridDimensions(lvl);
       const rect = container.getBoundingClientRect();
       const w = rect.width;
       const h = rect.height;
@@ -377,11 +602,8 @@ export function LevelCanvas({
       ctx.strokeRect(bounds.x, bounds.y, worldW * cam.zoom, worldH * cam.zoom);
 
       const sortedLayers = [...lvl.tile_layers].sort((a, b) => a.z - b.z);
-      let globalIndex = 0;
       for (const layer of sortedLayers) {
         layer.tiles.forEach((placement) => {
-          const index = globalIndex;
-          globalIndex += 1;
         const frame = animatedTileFrame(placement, elapsedMs);
         const ts = state.tilesets.get(frame.tileset);
         const image = state.tilesetImages.get(frame.tileset);
@@ -411,17 +633,6 @@ export function LevelCanvas({
           ctx.fillStyle = "#555";
           ctx.fillRect(p.x, p.y, pw, ph);
         }
-
-        const selected =
-          state.selectedPlacements.has(index) || index === state.selectedPlacement;
-        if (selected) {
-          ctx.strokeStyle = "#fff6a0";
-          ctx.lineWidth = 2;
-          ctx.strokeRect(p.x, p.y, pw, ph);
-          const ap = toScreen(placement.x, placement.y);
-          ctx.fillStyle = "#fff6a0";
-          ctx.fillRect(ap.x - 2, ap.y - 2, 4, 4);
-        }
         });
       }
 
@@ -439,44 +650,34 @@ export function LevelCanvas({
         ctx.strokeRect(p.x, p.y, ow, oh);
       });
 
-      const fluidsActive = state.mode === "fluids";
-      for (let gy = 0; gy < rows; gy++) {
-        for (let gx = 0; gx < cols; gx++) {
-          const fluid = lvl.fluids[gy]?.[gx] ?? 0;
-          if (fluid === 0) continue;
-          const p = toScreen(gx * gridSize, gy * gridSize);
-          ctx.fillStyle = FLUID_FILL[fluid] ?? "rgba(120,120,255,0.4)";
-          ctx.fillRect(p.x, p.y, gridScreen, gridScreen);
-          ctx.strokeStyle = fluidsActive
-            ? (FLUID_STROKE[fluid] ?? "rgba(180,180,255,0.8)")
-            : (FLUID_STROKE[fluid] ?? "rgba(140,140,200,0.45)");
-          ctx.lineWidth = fluidsActive ? 2 : 1;
-          ctx.strokeRect(p.x + 0.5, p.y + 0.5, gridScreen - 1, gridScreen - 1);
-        }
-      }
+      drawFluidOverlay(ctx, lvl, state.mode, gridSize, cols, rows, gridScreen, toScreen);
+      drawCollisionOverlay(ctx, lvl, state.mode, gridSize, cols, rows, gridScreen, toScreen);
+      drawSelectedPlacements(ctx, state, lvl, gridSize, cam, elapsedMs, toScreen);
 
-      const collisionFill =
-        state.mode === "collision" ? "rgba(255, 50, 50, 0.55)" : "rgba(255, 70, 70, 0.32)";
-      const collisionStroke =
-        state.mode === "collision" ? "rgba(255, 220, 120, 0.95)" : "rgba(255, 180, 100, 0.55)";
-
-      for (let gy = 0; gy < rows; gy++) {
-        for (let gx = 0; gx < cols; gx++) {
-          if ((lvl.collision[gy]?.[gx] ?? 0) === 0) continue;
-          const p = toScreen(gx * gridSize, gy * gridSize);
-          ctx.fillStyle = collisionFill;
-          ctx.fillRect(p.x, p.y, gridScreen, gridScreen);
-          ctx.strokeStyle = collisionStroke;
-          ctx.lineWidth = state.mode === "collision" ? 2 : 1;
-          ctx.strokeRect(p.x + 0.5, p.y + 0.5, gridScreen - 1, gridScreen - 1);
-        }
-      }
-
-      if (marquee) {
-        const { x0, y0, x1, y1 } = normalizeRect(marquee.x0, marquee.y0, marquee.x1, marquee.y1);
-        const p = toScreen(x0, y0);
-        const rw = (x1 - x0) * cam.zoom;
-        const rh = (y1 - y0) * cam.zoom;
+      if (previewFootprints && previewFootprints.length > 0) {
+        drawPreviewFootprints(
+          ctx,
+          previewFootprints,
+          cam,
+          toScreen,
+          "rgba(110, 168, 255, 0.22)",
+          "rgba(110, 168, 255, 0.95)",
+        );
+      } else if (previewCells && previewCells.length > 0) {
+        drawPreviewCells(
+          ctx,
+          previewCells,
+          gridSize,
+          gridScreen,
+          toScreen,
+          "rgba(110, 168, 255, 0.22)",
+          "rgba(110, 168, 255, 0.95)",
+        );
+      } else if (marquee) {
+        const fp = cellSpanFootprint(marquee.x0, marquee.y0, marquee.x1, marquee.y1, gridSize);
+        const p = toScreen(fp.x, fp.y);
+        const rw = fp.w * cam.zoom;
+        const rh = fp.h * cam.zoom;
         ctx.fillStyle = "rgba(110, 168, 255, 0.12)";
         ctx.fillRect(p.x, p.y, rw, rh);
         ctx.strokeStyle = "rgba(110, 168, 255, 0.95)";
@@ -512,6 +713,10 @@ export function LevelCanvas({
     frame = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(frame);
+      if (placementDragRafRef.current) {
+        cancelAnimationFrame(placementDragRafRef.current);
+        placementDragRafRef.current = 0;
+      }
       observer.disconnect();
     };
   }, []);
@@ -549,8 +754,8 @@ export function LevelCanvas({
   const paintStroke = (clientX: number, clientY: number, button: number, isStrokeStart: boolean) => {
     const world = screenToWorld(clientX, clientY);
     const { level: lvl, snapGrid: snap } = drawStateRef.current;
-    const gs = lvl.grid_size || GRID_SIZE;
-    const pos = snapWorldPoint(world.x, world.y, gs, snap);
+    const { gridSize } = subGridDimensions(lvl);
+    const pos = snapWorldPoint(world.x, world.y, gridSize, snap);
 
     if (isStrokeStart) {
       lastStrokeRef.current = pos;
@@ -569,6 +774,8 @@ export function LevelCanvas({
     marqueeRef.current = null;
     lineRef.current = null;
     fillRef.current = null;
+    previewCellsRef.current = null;
+    previewFootprintsRef.current = null;
     drawStateRef.current.marquee = null;
   };
 
@@ -625,12 +832,16 @@ export function LevelCanvas({
                   ? [...selectedPlacements]
                   : [hit];
             const dragIndices = indices.includes(hit) ? indices : [hit, ...indices];
+            const { gridSize } = subGridDimensions(level);
+            const grab = snapWorldPoint(world.x, world.y, gridSize, snapGrid);
             dragRef.current = {
               kind: "placements",
               indices: dragIndices,
               anchorIndex: hit,
-              offsetX: world.x - placement.x,
-              offsetY: world.y - placement.y,
+              grabSnappedX: grab.x,
+              grabSnappedY: grab.y,
+              anchorStartX: placement.x,
+              anchorStartY: placement.y,
             };
             onStrokeBegin?.();
             return;
@@ -642,18 +853,24 @@ export function LevelCanvas({
         }
 
         if (gridTool === "line" && e.button === 0 && mode !== "objects") {
-          const gs = level.grid_size || GRID_SIZE;
-          const s = snapWorldPoint(world.x, world.y, gs, snapGrid);
+          const { gridSize } = subGridDimensions(level);
+          const s = snapWorldPoint(world.x, world.y, gridSize, snapGrid);
           lineRef.current = { x0: s.x, y0: s.y, x1: s.x, y1: s.y };
-          drawStateRef.current.marquee = linePreviewRect(s.x, s.y, s.x, s.y, gs);
+          applyLinePreview(lineRef.current);
+          drawStateRef.current.marquee = lineRef.current;
+          hoverRef.current = null;
+          drawStateRef.current.hover = null;
           return;
         }
 
         if (gridTool === "fill" && e.button === 0 && mode !== "objects") {
-          const gs = level.grid_size || GRID_SIZE;
-          const s = snapWorldPoint(world.x, world.y, gs, snapGrid);
+          const { gridSize, cols, rows } = subGridDimensions(level);
+          const s = snapWorldPoint(world.x, world.y, gridSize, snapGrid);
           fillRef.current = { x0: s.x, y0: s.y, x1: s.x, y1: s.y };
+          applyFillPreview(s.x, s.y, s.x, s.y);
           drawStateRef.current.marquee = fillRef.current;
+          hoverRef.current = null;
+          drawStateRef.current.hover = null;
           return;
         }
 
@@ -669,10 +886,11 @@ export function LevelCanvas({
       }}
       onPointerMove={(e) => {
         const world = screenToWorld(e.clientX, e.clientY);
-        const gs = drawStateRef.current.level.grid_size || GRID_SIZE;
+        const lvl = drawStateRef.current.level;
+        const { gridSize } = subGridDimensions(lvl);
         const snap = drawStateRef.current.snapGrid;
 
-        if (!lineRef.current) {
+        if (!lineRef.current && !fillRef.current && dragRef.current?.kind !== "placements") {
           updateHover(e.clientX, e.clientY);
         }
 
@@ -694,23 +912,22 @@ export function LevelCanvas({
             lineRef.current.y0,
             world.x,
             world.y,
-            gs,
+            gridSize,
             snap,
           );
           lineRef.current = locked;
-          drawStateRef.current.marquee = linePreviewRect(
-            locked.x0,
-            locked.y0,
-            locked.x1,
-            locked.y1,
-            gs,
-          );
-          hoverRef.current = { x: locked.x1, y: locked.y1, w: gs, h: gs };
-          drawStateRef.current.hover = hoverRef.current;
+          applyLinePreview(locked);
+          drawStateRef.current.marquee = lineRef.current;
         }
         if (fillRef.current) {
-          const snapped = snapWorldPoint(world.x, world.y, gs, snap);
+          const snapped = snapWorldPoint(world.x, world.y, gridSize, snap);
           fillRef.current = { ...fillRef.current, x1: snapped.x, y1: snapped.y };
+          applyFillPreview(
+            fillRef.current.x0,
+            fillRef.current.y0,
+            fillRef.current.x1,
+            fillRef.current.y1,
+          );
           drawStateRef.current.marquee = fillRef.current;
         }
 
@@ -724,12 +941,38 @@ export function LevelCanvas({
         }
 
         if (dragRef.current?.kind === "placements") {
-          onPlacementsDrag(
-            dragRef.current.indices,
-            dragRef.current.anchorIndex,
-            world.x - dragRef.current.offsetX,
-            world.y - dragRef.current.offsetY,
+          const cursor = snapWorldPoint(world.x, world.y, gridSize, snap);
+          const targetX =
+            dragRef.current.anchorStartX + (cursor.x - dragRef.current.grabSnappedX);
+          const targetY =
+            dragRef.current.anchorStartY + (cursor.y - dragRef.current.grabSnappedY);
+          pendingPlacementDragRef.current = {
+            indices: dragRef.current.indices,
+            anchorIndex: dragRef.current.anchorIndex,
+            worldX: targetX,
+            worldY: targetY,
+          };
+          const dragHover = hoverFootprint(
+            drawStateRef.current,
+            targetX,
+            targetY,
+            gridSize,
           );
+          hoverRef.current = dragHover;
+          drawStateRef.current.hover = dragHover;
+          if (!placementDragRafRef.current) {
+            placementDragRafRef.current = requestAnimationFrame(() => {
+              placementDragRafRef.current = 0;
+              const pending = pendingPlacementDragRef.current;
+              if (!pending) return;
+              onPlacementsDrag(
+                pending.indices,
+                pending.anchorIndex,
+                pending.worldX,
+                pending.worldY,
+              );
+            });
+          }
           return;
         }
 
@@ -739,14 +982,14 @@ export function LevelCanvas({
       }}
       onPointerUp={(e) => {
         const world = screenToWorld(e.clientX, e.clientY);
-        const gs = level.grid_size || GRID_SIZE;
+        const { gridSize } = subGridDimensions(level);
 
         if (marqueeRef.current && mode === "tiles" && gridTool === "select") {
           const { x0, y0, x1, y1 } = marqueeRef.current;
           onMarqueeSelect(x0, y0, x1, y1, e.shiftKey);
         } else if (lineRef.current) {
           const { x0, y0 } = lineRef.current;
-          const end = constrainAxisLineEnd(x0, y0, world.x, world.y, gs, snapGrid);
+          const end = constrainAxisLineEnd(x0, y0, world.x, world.y, gridSize, snapGrid);
           try {
             onStrokeBegin?.();
             onLineTool(end.x0, end.y0, end.x1, end.y1);
@@ -755,7 +998,7 @@ export function LevelCanvas({
           }
         } else if (fillRef.current) {
           const { x0, y0 } = fillRef.current;
-          const end = snapWorldPoint(world.x, world.y, gs, snapGrid);
+          const end = snapWorldPoint(world.x, world.y, gridSize, snapGrid);
           onStrokeBegin?.();
           onFillTool(x0, y0, end.x, end.y);
           onStrokeEnd?.();
@@ -772,6 +1015,11 @@ export function LevelCanvas({
         lastStrokeRef.current = null;
         panRef.current.active = false;
         dragRef.current = null;
+        pendingPlacementDragRef.current = null;
+        if (placementDragRafRef.current) {
+          cancelAnimationFrame(placementDragRafRef.current);
+          placementDragRafRef.current = 0;
+        }
         onPlacementsDragEnd?.();
         clearDragPreview();
         try {
@@ -788,6 +1036,11 @@ export function LevelCanvas({
         lastStrokeRef.current = null;
         panRef.current.active = false;
         dragRef.current = null;
+        pendingPlacementDragRef.current = null;
+        if (placementDragRafRef.current) {
+          cancelAnimationFrame(placementDragRafRef.current);
+          placementDragRafRef.current = 0;
+        }
         onPlacementsDragEnd?.();
         clearDragPreview();
         hoverRef.current = null;

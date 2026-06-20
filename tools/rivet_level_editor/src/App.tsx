@@ -60,7 +60,7 @@ import {
   patchPlacementAtGlobal,
   placementsInRectInLevel,
   removePlacementsByGlobalIndices,
-  movePlacementsByGlobalIndices,
+  movePlacementsByGlobalIndicesFromSnapshot,
   tileCount,
   buildPlacementRefs,
 } from "./lib/level-tile-layers";
@@ -792,8 +792,9 @@ export function App() {
 
   const onLineTool = (x0: number, y0: number, x1: number, y1: number) => {
     if (mode === "tiles") {
-      const locked = constrainAxisLineEnd(x0, y0, x1, y1, level.grid_size, snapGrid);
-      const tw = activeTileset?.tile_width ?? level.grid_size;
+      const { gridSize } = subGridDimensions(level);
+      const locked = constrainAxisLineEnd(x0, y0, x1, y1, gridSize, snapGrid);
+      const tw = activeTileset?.tile_width ?? gridSize;
       const positions = snapTileAnchors(
         pixelAxisLinePositions(locked.x0, locked.y0, locked.x1, locked.y1, tw),
       );
@@ -1154,14 +1155,15 @@ export function App() {
 
 
       if (!canMovePlacements(snapshotTiles, indices, 0, 0, prev.width, prev.height)) {
-
         return prev;
-
       }
 
+      const snapshot = placementDragSnapshotRef.current;
+      if (!snapshot) {
+        return prev;
+      }
 
-
-      return movePlacementsByGlobalIndices(prev, indices, deltaX, deltaY);
+      return movePlacementsByGlobalIndicesFromSnapshot(prev, indices, snapshot, deltaX, deltaY);
 
     });
 

@@ -1,6 +1,9 @@
 import type { LevelObject } from "../types/level";
+import { gridLineCells } from "./level-collision";
+import { normalizeRect, rectSubCells } from "./grid-rect";
 import { objectColliderAabb } from "./object-collider";
 import type { ModelData } from "../types/model";
+import { worldToSubCell } from "./sub-grid";
 
 export function hitObject(
   objects: LevelObject[],
@@ -62,18 +65,51 @@ export function constrainAxisLineEnd(
   return { x0: start.x, y0: start.y, x1: start.x, y1: endY };
 }
 
-export function linePreviewRect(
+/** Pixel footprint for a sub-cell span (fill / marquee). */
+export function cellSpanFootprint(
+  px0: number,
+  py0: number,
+  px1: number,
+  py1: number,
+  gridSize: number,
+): { x: number; y: number; w: number; h: number } {
+  const { x0, y0, x1, y1 } = normalizeRect(px0, py0, px1, py1);
+  const gx0 = Math.floor(x0 / gridSize);
+  const gy0 = Math.floor(y0 / gridSize);
+  const gx1 = Math.floor((x1 - 1) / gridSize);
+  const gy1 = Math.floor((y1 - 1) / gridSize);
+  return {
+    x: gx0 * gridSize,
+    y: gy0 * gridSize,
+    w: (gx1 - gx0 + 1) * gridSize,
+    h: (gy1 - gy0 + 1) * gridSize,
+  };
+}
+
+/** Sub-grid cells for line-tool preview (matches collision/fluid line paint). */
+export function previewCellsForLine(
   x0: number,
   y0: number,
   x1: number,
   y1: number,
   gridSize: number,
-): { x: number; y: number; w: number; h: number } {
-  const minX = Math.min(x0, x1);
-  const minY = Math.min(y0, y1);
-  const maxX = Math.max(x0, x1);
-  const maxY = Math.max(y0, y1);
-  const w = maxX - minX + gridSize;
-  const h = maxY - minY + gridSize;
-  return { x: minX, y: minY, w, h };
+  snap: boolean,
+): Array<{ x: number; y: number }> {
+  const locked = constrainAxisLineEnd(x0, y0, x1, y1, gridSize, snap);
+  const c0 = worldToSubCell(locked.x0, locked.y0, gridSize);
+  const c1 = worldToSubCell(locked.x1, locked.y1, gridSize);
+  return gridLineCells(c0.x, c0.y, c1.x, c1.y);
+}
+
+/** Sub-grid cells for fill-tool preview (matches collision/fluid fill paint). */
+export function previewCellsForFill(
+  px0: number,
+  py0: number,
+  px1: number,
+  py1: number,
+  gridSize: number,
+  cols: number,
+  rows: number,
+): Array<{ x: number; y: number }> {
+  return rectSubCells(px0, py0, px1, py1, gridSize, cols, rows);
 }

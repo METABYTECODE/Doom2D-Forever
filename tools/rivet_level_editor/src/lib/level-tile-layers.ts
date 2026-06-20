@@ -252,6 +252,32 @@ export function movePlacementsByGlobalIndices(
   return { ...level, tile_layers };
 }
 
+/** Drag preview: set positions from drag-start snapshot + total delta (not cumulative add). */
+export function movePlacementsByGlobalIndicesFromSnapshot(
+  level: LevelData,
+  indices: number[],
+  snapshot: ReadonlyMap<number, { x: number; y: number }>,
+  deltaX: number,
+  deltaY: number,
+): LevelData {
+  if (indices.length === 0 || (deltaX === 0 && deltaY === 0)) {
+    return level;
+  }
+
+  let next = level;
+  for (const index of indices) {
+    const start = snapshot.get(index);
+    if (!start) {
+      continue;
+    }
+    next = patchPlacementAtGlobal(next, index, {
+      x: start.x + deltaX,
+      y: start.y + deltaY,
+    });
+  }
+  return next;
+}
+
 export function findPlacementOnActiveLayerGlobal(
   level: LevelData,
   layerId: string,
