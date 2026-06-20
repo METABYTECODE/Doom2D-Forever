@@ -26,7 +26,15 @@ import { useLevelHistory } from "./hooks/useLevelHistory";
 
 import { constrainAxisLineEnd, hitObject, snapPoint } from "./lib/geometry";
 
-import { cellsInWorldRect, cellsOnWorldStroke, cellKey, gridCellHasContent, occupiedCellsInWorldRect, translateGridCellValues } from "./lib/grid-tool-cells";
+import { cellsInWorldRect, cellsOnWorldStroke, cellKey, gridCellHasContent, parseCellKey, translateGridCellValues } from "./lib/grid-tool-cells";
+import {
+  layerContentCount,
+  layerContentInWorldRect,
+  layerContentLabel,
+  layerPickAtWorld,
+  layerPickHasContent,
+  type LayerPick,
+} from "./lib/layer-rect-tools";
 
 import { gridLineCells, paintCollisionCells } from "./lib/level-collision";
 
@@ -169,24 +177,27 @@ export function App() {
     setSelectedGridCells(new Set());
   }, []);
 
+  const clearLayerSelection = useCallback(() => {
+    clearTileSelection();
+    clearGridSelection();
+  }, [clearGridSelection, clearTileSelection]);
+
   const onGridToolChange = useCallback(
     (tool: GridTool) => {
       setGridToolState(tool);
       if (tool !== "select") {
-        clearTileSelection();
-        clearGridSelection();
+        clearLayerSelection();
       }
     },
-    [clearGridSelection, clearTileSelection],
+    [clearLayerSelection],
   );
 
   const onModeChange = useCallback(
     (nextMode: EditorMode) => {
       setMode(nextMode);
-      clearTileSelection();
-      clearGridSelection();
+      clearLayerSelection();
     },
-    [clearGridSelection, clearTileSelection],
+    [clearLayerSelection],
   );
 
   const [snapGrid, setSnapGrid] = useState(true);
@@ -469,93 +480,86 @@ export function App() {
 
 
 
-  const onTilePick = (index: number, additive: boolean) => {
-
-    if (index < 0) {
-
-      if (!additive) syncPrimarySelection(new Set());
-
+  const onLayerPick = (pick: LayerPick | null, additive: boolean) => {
+    if (!pick || !layerPickHasContent(pick)) {
+      if (!additive) clearLayerSelection();
       return;
-
     }
 
-    if (additive) {
-
-      const next = new Set(selectedPlacements);
-
-      if (next.has(index)) next.delete(index);
-
-      else next.add(index);
-
-      syncPrimarySelection(next);
-
+    if (pick.tileIndex !== null) {
+      if (additive) {
+        const next = new Set(selectedPlacements);
+        if (next.has(pick.tileIndex)) next.delete(pick.tileIndex);
+        else next.add(pick.tileIndex);
+        syncPrimarySelection(next);
+        return;
+      }
+      syncPrimarySelection(new Set([pick.tileIndex]));
       return;
-
     }
 
-    syncPrimarySelection(new Set([index]));
-
-  };
-
-
-
-  const onMarqueeSelect = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
-
-    const { gridSize } = subGridDimensions(level);
-
-    const hits = placementsInRectInLevel(level, tilesets, x0, y0, x1, y1, gridSize);
-
-    if (additive) {
-
-      const next = new Set(selectedPlacements);
-
-      for (const index of hits) next.add(index);
-
-      syncPrimarySelection(next);
-
-    } else {
-
-      syncPrimarySelection(new Set(hits));
-
+    if (pick.cellX >= 0) {
+      const key = cellKey(pick.cellX, pick.cellY);
+      if (additive) {
+        const next = new Set(selectedGridCells);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        setSelectedGridCells(next);
+        setStatus(`Selected ${layerContentLabel(mode, next.size)}`);
+        return;
+      }
+      setSelectedGridCells(new Set([key]));
+      setStatus(`Selected ${layerContentLabel(mode, 1)}`);
     }
-
-    setStatus(`Selected ${hits.length} tile(s)`);
-
   };
 
 
 
   const onRectSelect = (x0: number, y0: number, x1: number, y1: number, additive: boolean) => {
 
-    if (mode === "tiles") {
+    const content = layerContentInWorldRect(level, mode, tilesets, x0, y0, x1, y1);
 
-      onMarqueeSelect(x0, y0, x1, y1, additive);
+    const count = layerContentCount(content);
 
-      return;
+    if (count === 0) {
 
-    }
+      if (!additive) clearLayerSelection();
 
-    const { gridSize, cols, rows } = subGridDimensions(level);
-
-    const cells = occupiedCellsInWorldRect(level, mode, x0, y0, x1, y1, gridSize, cols, rows);
-
-    if (cells.length === 0) {
-
-      if (!additive) setSelectedGridCells(new Set());
-
-      setStatus(mode === "collision" ? "No collision in area" : "No fluid in area");
+      setStatus(mode === "tiles" ? "No tiles in area" : `No ${mode} in area`);
 
       return;
 
     }
 
-    const next = additive ? new Set(selectedGridCells) : new Set<string>();
+    if (content.tileIndices.length > 0) {
 
-    for (const cell of cells) next.add(cellKey(cell.x, cell.y));
+      if (additive) {
 
-    setSelectedGridCells(next);
+        const next = new Set(selectedPlacements);
 
-    setStatus(`Selected ${next.size} cell(s)`);
+        for (const index of content.tileIndices) next.add(index);
+
+        syncPrimarySelection(next);
+
+      } else {
+
+        syncPrimarySelection(new Set(content.tileIndices));
+
+      }
+
+    }
+
+    if (content.cellKeys.length > 0) {
+
+      const next = additive ? new Set(selectedGridCells) : new Set<string>();
+
+      for (const key of content.cellKeys) next.add(key);
+
+      setSelectedGridCells(next);
+
+    }
+
+    setStatus(`Selected ${layerContentLabel(mode, count)}`);
 
   };
 
@@ -563,39 +567,13 @@ export function App() {
 
   const onRectErase = (x0: number, y0: number, x1: number, y1: number) => {
 
-    const { gridSize, cols, rows } = subGridDimensions(level);
+    const content = layerContentInWorldRect(level, mode, tilesets, x0, y0, x1, y1);
 
-    if (mode === "tiles") {
+    const count = layerContentCount(content);
 
-      const hits = placementsInRectInLevel(level, tilesets, x0, y0, x1, y1, gridSize);
+    if (count === 0) {
 
-      if (hits.length === 0) {
-
-        setStatus("No tiles in area");
-
-        return;
-
-      }
-
-      beginStroke();
-
-      update((prev) => removePlacementsByGlobalIndices(prev, new Set(hits)));
-
-      endStroke();
-
-      clearTileSelection();
-
-      setStatus(`Erased ${hits.length} tile(s)`);
-
-      return;
-
-    }
-
-    const cells = cellsInWorldRect(x0, y0, x1, y1, gridSize, cols, rows);
-
-    if (cells.length === 0) {
-
-      setStatus("No cells in area");
+      setStatus(mode === "tiles" ? "No tiles in area" : `No ${mode} in area`);
 
       return;
 
@@ -603,59 +581,37 @@ export function App() {
 
     beginStroke();
 
-    if (mode === "collision") {
+    if (content.tileIndices.length > 0) {
 
-      applyCollisionCells(cells, 0);
+      update((prev) => removePlacementsByGlobalIndices(prev, new Set(content.tileIndices)));
 
-      setStatus(`Erased ${cells.length} collision cell(s)`);
+    }
 
-    } else if (mode === "fluids") {
+    if (content.cellKeys.length > 0) {
 
-      applyFluidCells(cells, FLUID_NONE);
+      const cells = content.cellKeys
 
-      setStatus(`Erased ${cells.length} fluid cell(s)`);
+        .map((key) => parseCellKey(key))
+
+        .filter((cell): cell is { x: number; y: number } => cell !== null);
+
+      if (mode === "collision") {
+
+        applyCollisionCells(cells, 0);
+
+      } else if (mode === "fluids") {
+
+        applyFluidCells(cells, FLUID_NONE);
+
+      }
 
     }
 
     endStroke();
 
-    clearGridSelection();
+    clearLayerSelection();
 
-  };
-
-
-
-  const onGridCellPick = (cellX: number, cellY: number, additive: boolean) => {
-
-    if (!gridCellHasContent(level, mode, cellX, cellY)) {
-
-      if (!additive) setSelectedGridCells(new Set());
-
-      return;
-
-    }
-
-    const key = cellKey(cellX, cellY);
-
-    if (additive) {
-
-      const next = new Set(selectedGridCells);
-
-      if (next.has(key)) next.delete(key);
-
-      else next.add(key);
-
-      setSelectedGridCells(next);
-
-      setStatus(`Grid selection: ${next.size} cell(s)`);
-
-      return;
-
-    }
-
-    setSelectedGridCells(new Set([key]));
-
-    setStatus("Selected 1 cell");
+    setStatus(`Erased ${layerContentLabel(mode, count)}`);
 
   };
 
@@ -1306,12 +1262,12 @@ export function App() {
     placementDragSnapshotRef.current = null;
   };
 
-  const onGridCellsDrag = (deltaX: number, deltaY: number) => {
-    if ((deltaX === 0 && deltaY === 0) || selectedGridCells.size === 0) return;
+  const onGridCellsDrag = (cellKeys: string[], deltaX: number, deltaY: number) => {
+    if ((deltaX === 0 && deltaY === 0) || cellKeys.length === 0) return;
 
     if (!gridDragSnapshotRef.current) {
       gridDragSnapshotRef.current = {
-        keys: new Set(selectedGridCells),
+        keys: new Set(cellKeys),
         collision:
           mode === "collision" ? level.collision.map((row) => [...row]) : undefined,
         fluids: mode === "fluids" ? level.fluids.map((row) => [...row]) : undefined,
@@ -1547,9 +1503,9 @@ export function App() {
 
             onGridCellsDragEnd={onGridCellsDragEnd}
 
-            onClearGridSelection={clearGridSelection}
+            onClearLayerSelection={clearLayerSelection}
 
-            onGridCellPick={onGridCellPick}
+            onLayerPick={onLayerPick}
 
             onRectSelect={onRectSelect}
 
@@ -1558,8 +1514,6 @@ export function App() {
             onLineTool={onLineTool}
 
             onFillTool={onFillTool}
-
-            onTilePick={onTilePick}
 
           />
 

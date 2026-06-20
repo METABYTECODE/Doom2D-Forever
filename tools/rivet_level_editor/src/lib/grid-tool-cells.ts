@@ -47,23 +47,6 @@ export function gridCellHasContent(
   return false;
 }
 
-/** Sub-grid cells with collision/fluid data inside a world rect (marquee select). */
-export function occupiedCellsInWorldRect(
-  level: LevelData,
-  mode: EditorMode,
-  x0: number,
-  y0: number,
-  x1: number,
-  y1: number,
-  gridSize: number,
-  cols: number,
-  rows: number,
-): GridCell[] {
-  return cellsInWorldRect(x0, y0, x1, y1, gridSize, cols, rows).filter((cell) =>
-    gridCellHasContent(level, mode, cell.x, cell.y),
-  );
-}
-
 /** Sub-grid cells along a world line (Bresenham). */
 export function cellsOnWorldLine(
   x0: number,
