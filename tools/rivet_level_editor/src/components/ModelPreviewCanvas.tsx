@@ -111,6 +111,8 @@ export function ModelPreviewCanvas({
       ctx.strokeStyle = "#6ea8ff";
       ctx.lineWidth = 2;
       ctx.strokeRect(originX, originY, drawW, drawH);
+      ctx.fillStyle = "rgba(110,168,255,0.12)";
+      ctx.fillRect(originX, originY, drawW, drawH);
     } else {
       ctx.fillStyle = "rgba(255,255,255,0.06)";
       ctx.fillRect(originX, originY, drawW, drawH);

@@ -120,6 +120,19 @@ function hoverFootprint(
   }
 
   const anchor = snapWorldPoint(worldX, worldY, gridSize, state.snapGrid);
+
+  if (
+    state.mode === "tiles" &&
+    state.activeTilesetId &&
+    (state.gridTool === "paint" || state.gridTool === "erase")
+  ) {
+    const tileset = state.tilesets.get(state.activeTilesetId);
+    if (tileset) {
+      const dest = tileDestRect(anchor.x, anchor.y, tileset);
+      return { x: dest.x, y: dest.y, w: dest.w, h: dest.h };
+    }
+  }
+
   if (state.mode === "objects" && state.objectTool === "place-player") {
     const playerModel = state.modelCatalog.get("player");
     const pivot = playerPlacementPivot(anchor.x, anchor.y, gridSize);
@@ -150,6 +163,12 @@ function hoverStrokeColor(mode: EditorMode): string {
   if (mode === "collision") return "rgba(255,200,100,1)";
   if (mode === "fluids") return "rgba(120,190,255,1)";
   return "rgba(110,168,255,0.9)";
+}
+
+function hoverFillColor(mode: EditorMode): string {
+  if (mode === "collision") return "rgba(255,90,60,0.28)";
+  if (mode === "fluids") return "rgba(80,160,255,0.28)";
+  return "rgba(110,168,255,0.16)";
 }
 
 export function LevelCanvas({
@@ -343,7 +362,10 @@ export function LevelCanvas({
             ctx.fillStyle = (gx + gy) % 2 === 0 ? "#151820" : "#12151c";
             ctx.fillRect(p.x, p.y, gridScreen, gridScreen);
           }
-          ctx.strokeStyle = "rgba(80, 90, 110, 0.18)";
+          ctx.strokeStyle =
+            state.mode === "collision" || state.mode === "fluids"
+              ? "rgba(120, 140, 180, 0.38)"
+              : "rgba(80, 90, 110, 0.18)";
           ctx.lineWidth = 1;
           ctx.strokeRect(p.x + 0.5, p.y + 0.5, gridScreen - 1, gridScreen - 1);
         }
@@ -403,6 +425,20 @@ export function LevelCanvas({
         });
       }
 
+      lvl.objects.forEach((object, index) => {
+        const box = objectColliderAabb(object, state.modelCatalog);
+        const p = toScreen(box.x, box.y);
+        const ow = box.width * cam.zoom;
+        const oh = box.height * cam.zoom;
+        ctx.fillStyle = OBJECT_COLORS[object.type] ?? "#c8c850";
+        ctx.globalAlpha = index === state.selectedObject ? 1 : 0.85;
+        ctx.fillRect(p.x, p.y, ow, oh);
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = index === state.selectedObject ? "#fff6a0" : "rgba(255,255,255,0.35)";
+        ctx.lineWidth = index === state.selectedObject ? 2 : 1;
+        ctx.strokeRect(p.x, p.y, ow, oh);
+      });
+
       const fluidsActive = state.mode === "fluids";
       for (let gy = 0; gy < rows; gy++) {
         for (let gx = 0; gx < cols; gx++) {
@@ -454,24 +490,12 @@ export function LevelCanvas({
         const hp = toScreen(hover.x, hover.y);
         const hw = hover.w * cam.zoom;
         const hh = hover.h * cam.zoom;
+        ctx.fillStyle = hoverFillColor(state.mode);
+        ctx.fillRect(hp.x, hp.y, hw, hh);
         ctx.strokeStyle = hoverStrokeColor(state.mode);
         ctx.lineWidth = 2;
         ctx.strokeRect(hp.x, hp.y, hw, hh);
       }
-
-      lvl.objects.forEach((object, index) => {
-        const box = objectColliderAabb(object, state.modelCatalog);
-        const p = toScreen(box.x, box.y);
-        const ow = box.width * cam.zoom;
-        const oh = box.height * cam.zoom;
-        ctx.fillStyle = OBJECT_COLORS[object.type] ?? "#c8c850";
-        ctx.globalAlpha = index === state.selectedObject ? 1 : 0.85;
-        ctx.fillRect(p.x, p.y, ow, oh);
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = index === state.selectedObject ? "#fff6a0" : "rgba(255,255,255,0.35)";
-        ctx.lineWidth = index === state.selectedObject ? 2 : 1;
-        ctx.strokeRect(p.x, p.y, ow, oh);
-      });
 
       ctx.fillStyle = "rgba(200,210,230,0.7)";
       ctx.font = "11px JetBrains Mono, monospace";
